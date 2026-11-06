@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,6 +14,9 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/dengqi/telesend/internal/config"
+	"github.com/dengqi/telesend/internal/telegram"
 )
 
 // call is one request that reached the mock Telegram server.
@@ -602,4 +606,76 @@ func (l *lineStamp) Write(p []byte) (int, error) {
 		stampedLines = append(stampedLines, time.Now())
 	}
 	return l.w.Write(p)
+}
+
+func TestAlbumSizeNeverExceedsRPM(t *testing.T) {
+	media := make([]telegram.Media, 10)
+	names := make([]string, 10)
+	for i := range media {
+		media[i] = telegram.Media{Path: fmt.Sprintf("p%d.jpg", i), Kind: telegram.KindPhoto}
+		names[i] = media[i].Path
+	}
+	for _, tc := range []struct{ rpm, albumSize, jobs, weight int }{
+		{rpm: 5, albumSize: 10, jobs: 2, weight: 5},
+		{rpm: 20, albumSize: 10, jobs: 1, weight: 10},
+		{rpm: 1, albumSize: 10, jobs: 10, weight: 1},
+	} {
+		s := session{cfg: config.Config{RPM: tc.rpm, AlbumSize: tc.albumSize}}
+		jobs := albumJobs(s, media, names, telegram.Options{})
+		if len(jobs) != tc.jobs {
+			t.Errorf("rpm %d: %d jobs, want %d", tc.rpm, len(jobs), tc.jobs)
+			continue
+		}
+		for _, j := range jobs {
+			if j.Weight > tc.rpm || (tc.jobs < 10 && j.Weight != tc.weight) {
+				t.Errorf("rpm %d: job weight %d", tc.rpm, j.Weight)
+			}
+		}
+	}
+}
+
+func TestTextFileErrorGivesJSONAndHidesToken(t *testing.T) {
+	m := newMock(t)
+	env := okEnv(m)
+	env["TELESEND_BOT_TOKEN"] = "SECRET:TOKENVALUE"
+	out, err := run(t, env, "text", "--file", "/tmp/dir-SECRET:TOKENVALUE/missing.txt", "--json")
+	if err == nil || strings.Contains(err.Error(), "TOKENVALUE") || strings.Contains(out, "TOKENVALUE") {
+		t.Fatalf("token leaked: err=%v out=%s", err, out)
+	}
+	var rep struct {
+		OK    bool   `json:"ok"`
+		Error string `json:"error"`
+	}
+	if jerr := json.Unmarshal([]byte(out), &rep); jerr != nil || rep.OK || rep.Error == "" {
+		t.Errorf("stdout is not a failure object: %v\n%s", jerr, out)
+	}
+}
+
+// flakyWriter fails its first write.
+type flakyWriter struct {
+	failed bool
+	buf    bytes.Buffer
+}
+
+func (f *flakyWriter) Write(p []byte) (int, error) {
+	if !f.failed {
+		f.failed = true
+		return 0, errors.New("disk full")
+	}
+	return f.buf.Write(p)
+}
+
+func TestWriteErrorOfSentLineIsReturned(t *testing.T) {
+	m := newMock(t)
+	t.Setenv("TELESEND_BOT_TOKEN", "tok")
+	t.Setenv("TELESEND_CHAT_ID", "1")
+	t.Setenv("TELESEND_BASE_URL", m.URL)
+	w := &flakyWriter{}
+	root := NewRootCmd()
+	root.SetOut(w)
+	root.SetErr(w)
+	root.SetArgs([]string{"text", "hi", "--rpm", "1800"})
+	if err := root.Execute(); err == nil || !strings.Contains(err.Error(), "disk full") {
+		t.Errorf("a lost output line must not end as success: %v", err)
+	}
 }

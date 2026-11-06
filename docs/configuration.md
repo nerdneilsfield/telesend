@@ -37,6 +37,8 @@ The default of 20 requests per minute stays under the group limit. For a private
 
 telesend never sends more than `rpm` messages in any 60 seconds. An album of n items counts as n messages, because Telegram counts each item as a message.
 
+An album cannot hold more items than `--rpm`. When `--album-size` is larger, telesend makes the albums smaller. With `--rpm 1`, it sends each file alone.
+
 telesend also spaces requests evenly: 60 ÷ `rpm` seconds apart. An album goes out at once. The next request waits for one spacing for each item of the album. At the default, a request after an album of 10 items waits 30 seconds.
 
 When `--concurrency` is above 1, messages can arrive out of order. Keep the default when order matters.

@@ -215,11 +215,9 @@ func TestNoWindowHoldsMoreThanRPM(t *testing.T) {
 	}
 }
 
-func TestWeightAboveRPMStillGoesOut(t *testing.T) {
+func TestWeightAboveRPMIsRejected(t *testing.T) {
 	lim := newLimiter(5, time.Second)
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	if err := lim.Wait(ctx, 10); err != nil {
-		t.Fatalf("an album of 10 at rpm 5 must still be sent: %v", err)
+	if err := lim.Wait(context.Background(), 10); err == nil {
+		t.Fatal("an album of 10 at rpm 5 can never fit one window; want an error, not a silent under-count")
 	}
 }

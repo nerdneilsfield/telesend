@@ -24,7 +24,7 @@ This page is for contributors. It is available in English only.
 
 ## Limiter and pool
 
-The limiter hands out start times by two rules. The weight of a job is its message count: 1 for a text, the item count for an album. A weight above `rpm` is capped at `rpm`.
+The limiter hands out start times by two rules. The weight of a job is its message count: 1 for a text, the item count for an album. The limiter rejects a weight above `rpm`. The album builder keeps album sizes at or under `rpm`, so this error does not occur in normal use.
 
 1. Spacing: a job of weight n starts at the next free slot, and then it closes the next n slots. One slot is 60 s ÷ `rpm`.
 2. Window: a job starts only when the weights of the jobs that started in the last 60 s, plus its own weight, are at most `rpm`. If not, the job waits until the oldest of those jobs leaves the window.

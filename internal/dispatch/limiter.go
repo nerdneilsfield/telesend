@@ -5,6 +5,7 @@ package dispatch
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 )
@@ -42,7 +43,11 @@ func newLimiter(rpm int, window time.Duration) *Limiter {
 }
 
 // Wait blocks until a send of the given weight may start, or until ctx ends.
+// A weight above rpm can never fit one window, so Wait rejects it.
 func (l *Limiter) Wait(ctx context.Context, weight int) error {
+	if weight > l.rpm {
+		return fmt.Errorf("a send of %d messages exceeds the limit of %d per minute", weight, l.rpm)
+	}
 	for {
 		start := l.reserve(weight)
 		if err := sleep(ctx, time.Until(start)); err != nil {
@@ -60,8 +65,7 @@ func (l *Limiter) Wait(ctx context.Context, weight int) error {
 
 // reserve claims the next start time for a send of the given weight.
 func (l *Limiter) reserve(weight int) time.Time {
-	// A weight above rpm could never fit one window. Cap it, so the send still goes out.
-	w := min(max(weight, 1), l.rpm)
+	w := max(weight, 1)
 
 	l.mu.Lock()
 	defer l.mu.Unlock()

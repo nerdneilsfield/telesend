@@ -112,7 +112,12 @@ func newAlbumCmd(sp albumSpec) *cobra.Command {
 // Only the first job carries the caption.
 func albumJobs(s session, media []telegram.Media, names []string, opts telegram.Options) []dispatch.Job {
 	var jobs []dispatch.Job
-	size := s.cfg.AlbumSize
+	// An album of n items counts as n messages, so it cannot exceed --rpm.
+	// With --rpm 1 no album fits, and each file goes out alone.
+	size := min(s.cfg.AlbumSize, s.cfg.RPM)
+	if size < 2 {
+		size = 1
+	}
 	for i := 0; i < len(media); i += size {
 		end := min(i+size, len(media))
 		chunk := media[i:end]

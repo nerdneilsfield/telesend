@@ -73,6 +73,7 @@ func runSend(cmd *cobra.Command, build builder) error {
 	out := cmd.OutOrStdout()
 	bar := newProgress(jobs, !asJSON && stderrIsTerminal())
 	var outMu sync.Mutex // One sent line at a time, drawn in place of the bar.
+	var lineErr error    // The first error from writing a sent line. Guarded by outMu.
 
 	log.Info("sending", zap.Int("jobs", len(jobs)))
 	began := time.Now()
@@ -92,7 +93,9 @@ func runSend(cmd *cobra.Command, build builder) error {
 			outMu.Lock()
 			defer outMu.Unlock()
 			bar.pause()
-			_, _ = fmt.Fprintln(out, humanLine(r))
+			if _, err := fmt.Fprintln(out, humanLine(r)); err != nil && lineErr == nil {
+				lineErr = err
+			}
 			bar.resume()
 		},
 		OnAttempt: func(job string, attempt int, took time.Duration, err error) {
@@ -129,7 +132,9 @@ func runSend(cmd *cobra.Command, build builder) error {
 	if err := failure(results, cmd.Context().Err() != nil); err != nil {
 		return errors.New(hide(err.Error()))
 	}
-	return nil
+	outMu.Lock()
+	defer outMu.Unlock()
+	return lineErr
 }
 
 // hideResults removes secrets from the names and error texts of the results.

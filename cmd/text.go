@@ -33,11 +33,11 @@ lists, quotes, links and code.`,
   telesend text --markdown "# Report\n\n- **ok**: 12\n- failed: 0"
   git log -5 --oneline | telesend text`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			body, err := readText(cmd, args, file)
-			if err != nil {
-				return usageErr(cmd, err)
-			}
 			return runSend(cmd, func(_ context.Context, s session) ([]dispatch.Job, func(), error) {
+				body, err := readText(cmd, args, file)
+				if err != nil {
+					return nil, nil, usageErr(cmd, err)
+				}
 				var pieces []string
 				if markdown {
 					pieces, err = mdv2.Convert(body, s.cfg.TextLimit)
