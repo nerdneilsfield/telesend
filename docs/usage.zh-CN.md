@@ -88,6 +88,8 @@ Telegram 把 `.ogg`（Opus）、`.mp3` 和 `.m4a` 文件作为语音消息播放
 
 其他本地格式先由 telesend 转换为 OGG/Opus。这一步需要 `ffmpeg`。内容为 Vorbis 的 `.ogg` 文件会作为文档到达，不是语音消息。
 
+Docker 镜像不包含 `ffmpeg`。
+
 telesend 只转换本地文件。指向 `.wav` 或其他不支持格式的 URL 会报错并停止。请先下载文件，再传入本地路径。
 
 ## 你看到的输出

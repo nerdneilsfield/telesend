@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
+	"github.com/dengqi/telesend/internal/buildinfo"
 	"github.com/dengqi/telesend/internal/config"
 	"github.com/dengqi/telesend/internal/logging"
 )
@@ -42,6 +43,7 @@ func NewRootCmd() *cobra.Command {
 
 	root := &cobra.Command{
 		Use:           "telesend",
+		Version:       buildinfo.Version,
 		Short:         "Send text, files, photos and voice to Telegram",
 		Long:          rootLong,
 		Example:       rootExample,

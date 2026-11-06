@@ -31,3 +31,6 @@ dist/
 /telesend
 coverage.out
 coverage.html
+
+# Counterweight plugin state
+.cw/

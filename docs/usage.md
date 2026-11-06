@@ -88,6 +88,8 @@ Telegram plays `.ogg` (Opus), `.mp3`, and `.m4a` files as voice messages. telese
 
 For any other local format, telesend converts the file to OGG/Opus first. This step needs `ffmpeg`. An `.ogg` file that holds Vorbis audio arrives as a document, not as a voice message.
 
+The Docker image does not include `ffmpeg`.
+
 telesend converts local files only. A URL to a `.wav` or another unsupported format stops with an error. Download the file, and pass the local path.
 
 ## What you see

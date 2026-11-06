@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"sync"
 	"time"
@@ -30,7 +31,7 @@ func stderrIsTerminal() bool {
 }
 
 // newProgress returns nil when enabled is false or when there is nothing to send.
-func newProgress(jobs []dispatch.Job, enabled bool) *progress {
+func newProgress(jobs []dispatch.Job, enabled bool, w io.Writer) *progress {
 	if !enabled || len(jobs) == 0 {
 		return nil
 	}
@@ -41,7 +42,7 @@ func newProgress(jobs []dispatch.Job, enabled bool) *progress {
 		total += j.Size
 	}
 	opts := []progressbar.Option{
-		progressbar.OptionSetWriter(os.Stderr),
+		progressbar.OptionSetWriter(w),
 		progressbar.OptionSetWidth(24),
 		progressbar.OptionThrottle(100 * time.Millisecond),
 		progressbar.OptionSetPredictTime(true),

@@ -28,7 +28,7 @@ clean: ## clean up environment
 	rm -rf coverage.out dist/ $(projectname) $(projectname).exe
 
 cover: ## display test coverage
-	CGO_ENABLED=0 go test -v -race ./... -coverprofile=coverage.out
+	CGO_ENABLED=1 go test -v -race ./... -coverprofile=coverage.out
 	go tool cover -func=coverage.out
 
 fmt: ## format go files

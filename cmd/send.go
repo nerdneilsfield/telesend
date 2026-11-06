@@ -71,7 +71,7 @@ func runSend(cmd *cobra.Command, build builder) error {
 	}
 
 	out := cmd.OutOrStdout()
-	bar := newProgress(jobs, !asJSON && stderrIsTerminal())
+	bar := newProgress(jobs, !asJSON && stderrIsTerminal(), os.Stderr)
 	var outMu sync.Mutex // One sent line at a time, drawn in place of the bar.
 	var lineErr error    // The first error from writing a sent line. Guarded by outMu.
 

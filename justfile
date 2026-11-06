@@ -32,7 +32,7 @@ clean:
 
 # 显示测试覆盖率
 cover:
-    CGO_ENABLED=0 go test -v -race ./... -coverprofile=coverage.out
+    CGO_ENABLED=1 go test -v -race ./... -coverprofile=coverage.out
     go tool cover -func=coverage.out
 
 # 格式化 Go 文件
