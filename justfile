@@ -1,5 +1,5 @@
-projectname := "go-template"
-pkg := "github.com/nerdneilsfield/go-template"
+projectname := "telesend"
+pkg := "github.com/dengqi/telesend"
 version := `git describe --tags --always --dirty 2>/dev/null || echo dev`
 commit := `git rev-parse --short HEAD 2>/dev/null || echo none`
 date := `date -u +%Y-%m-%dT%H:%M:%SZ`

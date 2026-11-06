@@ -6,13 +6,13 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . ./
 RUN CGO_ENABLED=0 go build -trimpath \
-    -ldflags "-s -w -X github.com/nerdneilsfield/go-template/internal/buildinfo.Version=${VERSION}" \
-    -o /out/go-template ./
+    -ldflags "-s -w -X github.com/dengqi/telesend/internal/buildinfo.Version=${VERSION}" \
+    -o /out/telesend ./
 
 FROM gcr.io/distroless/static-debian13:nonroot
 
 USER nonroot:nonroot
 WORKDIR /app
-COPY --from=build /out/go-template /app/go-template
+COPY --from=build /out/telesend /app/telesend
 
-ENTRYPOINT ["/app/go-template"]
+ENTRYPOINT ["/app/telesend"]

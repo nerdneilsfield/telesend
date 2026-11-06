@@ -1,4 +1,4 @@
-// Command go-template is the template CLI entry point.
+// Command telesend is the template CLI entry point.
 package main
 
 import (
@@ -8,7 +8,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/nerdneilsfield/go-template/cmd"
+	"github.com/dengqi/telesend/cmd"
 )
 
 func main() {

@@ -1,4 +1,4 @@
-// Package cmd defines the go-template command tree.
+// Package cmd defines the telesend command tree.
 package cmd
 
 import (
@@ -7,7 +7,7 @@ import (
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 
-	"github.com/nerdneilsfield/go-template/internal/logging"
+	"github.com/dengqi/telesend/internal/logging"
 )
 
 type loggerKey struct{}
@@ -17,8 +17,8 @@ func NewRootCmd() *cobra.Command {
 	var verbose bool
 
 	cmd := &cobra.Command{
-		Use:           "go-template",
-		Short:         "go-template is a template for go projects.",
+		Use:           "telesend",
+		Short:         "telesend is a template for go projects.",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRun: func(cmd *cobra.Command, _ []string) {

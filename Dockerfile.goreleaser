@@ -4,6 +4,6 @@ ARG TARGETPLATFORM
 
 USER nonroot:nonroot
 WORKDIR /app
-COPY ${TARGETPLATFORM}/go-template /app/go-template
+COPY ${TARGETPLATFORM}/telesend /app/telesend
 
-ENTRYPOINT ["/app/go-template"]
+ENTRYPOINT ["/app/telesend"]
