@@ -4,13 +4,16 @@
 // Convert parses the input and escapes every reserved character in plain text.
 // It maps the CommonMark constructs that MarkdownV2 can show and writes
 // the rest as plain text.
+//
+// Telegram counts the characters of a message after it parses the markup.
+// Convert measures the same way, so an escape does not count as a character.
 package mdv2
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
@@ -19,7 +22,11 @@ import (
 	"github.com/yuin/goldmark/text"
 )
 
-const reserved = "_*[]()~`>#+-=|{}.!\\"
+const (
+	reserved = "_*[]()~`>#+-=|{}.!\\"
+	// maxLang caps the language label of a fenced code block.
+	maxLang = 20
+)
 
 var parser = goldmark.New(goldmark.WithExtensions(extension.Strikethrough)).Parser()
 
@@ -39,14 +46,39 @@ func escapeSet(s, set string) string {
 	return b.String()
 }
 
-// Convert renders src as MarkdownV2 messages. Each message is at most limit
-// characters. Convert splits between blocks, and between lines inside a code block.
+// VisibleLen counts the characters of s as Telegram counts them. A backslash
+// that escapes a character does not count. Entity markers such as * and _ do
+// count, which overstates the length by a few characters.
+func VisibleLen(s string) int {
+	n := 0
+	escaped := false
+	for _, r := range s {
+		if r == '\\' && !escaped {
+			escaped = true
+			continue
+		}
+		escaped = false
+		n++
+	}
+	return n
+}
+
+// piece is a part of a message. sep joins it to the piece before it in the same message.
+type piece struct {
+	text string
+	sep  string
+}
+
+// Convert renders src as MarkdownV2 messages. Each message has at most limit
+// characters. Convert splits a paragraph between inline elements, a list between
+// items, and a code block between lines. It returns an error for a heading, a
+// list item, a quote, or an inline element that is longer than limit.
 func Convert(src string, limit int) ([]string, error) {
 	data := []byte(src)
 	doc := parser.Parse(text.NewReader(data))
 	r := &renderer{src: data, limit: limit}
 
-	var pieces []string
+	var pieces []piece
 	for n := doc.FirstChild(); n != nil; n = n.NextSibling() {
 		parts, err := r.block(n)
 		if err != nil {
@@ -54,25 +86,25 @@ func Convert(src string, limit int) ([]string, error) {
 		}
 		pieces = append(pieces, parts...)
 	}
-	return pack(pieces, "\n\n", limit), nil
+	return pack(pieces, limit, VisibleLen), nil
 }
 
-// pack joins pieces with sep into messages of at most limit characters.
-func pack(pieces []string, sep string, limit int) []string {
+// pack joins pieces into messages of at most limit characters, as size measures them.
+func pack(pieces []piece, limit int, size func(string) int) []string {
 	var out []string
 	cur := ""
 	for _, p := range pieces {
 		switch {
 		case cur == "":
-			cur = p
-		case utf8.RuneCountInString(cur)+utf8.RuneCountInString(sep)+utf8.RuneCountInString(p) <= limit:
-			cur += sep + p
+			cur = p.text
+		case size(cur+p.sep+p.text) <= limit:
+			cur += p.sep + p.text
 		default:
-			out = append(out, cur)
-			cur = p
+			out = append(out, strings.Trim(cur, " \n"))
+			cur = p.text
 		}
 	}
-	if cur != "" {
+	if cur = strings.Trim(cur, " \n"); cur != "" {
 		out = append(out, cur)
 	}
 	return out
@@ -83,56 +115,132 @@ type renderer struct {
 	limit int
 }
 
-// block renders one block node into one or more pieces that each fit the limit.
-func (r *renderer) block(n ast.Node) ([]string, error) {
-	switch n := n.(type) {
-	case *ast.FencedCodeBlock, *ast.CodeBlock:
-		return r.code(n), nil
-	}
-	s := strings.TrimRight(r.blockText(n, 0), "\n")
-	if utf8.RuneCountInString(s) <= r.limit {
-		return []string{s}, nil
-	}
-	lines := strings.Split(s, "\n")
-	for _, l := range lines {
-		if utf8.RuneCountInString(l) > r.limit {
-			return nil, fmt.Errorf("a line is longer than %d characters; break it up", r.limit)
-		}
-	}
-	return pack(lines, "\n", r.limit), nil
+func (r *renderer) tooLong(what string) error {
+	return fmt.Errorf("%s is longer than %d characters; shorten it or raise the limit", what, r.limit)
 }
 
-// code splits a code block into fenced pieces of at most limit characters.
-func (r *renderer) code(n ast.Node) []string {
+// block renders one top-level block into pieces that each fit the limit.
+func (r *renderer) block(n ast.Node) ([]piece, error) {
+	const blockSep = "\n\n"
+	switch n := n.(type) {
+	case *ast.FencedCodeBlock, *ast.CodeBlock:
+		return r.code(n)
+	case *ast.Paragraph, *ast.TextBlock:
+		return r.paragraph(n)
+	case *ast.List:
+		items := r.listItems(n, 0)
+		out := make([]piece, len(items))
+		for i, it := range items {
+			if VisibleLen(it) > r.limit {
+				return nil, r.tooLong("a list item")
+			}
+			out[i] = piece{text: it, sep: "\n"}
+		}
+		if len(out) > 0 {
+			out[0].sep = blockSep
+		}
+		return out, nil
+	}
+	s := strings.TrimRight(r.blockText(n, 0), "\n")
+	if VisibleLen(s) > r.limit {
+		return nil, r.tooLong("a heading, quote or other block")
+	}
+	return []piece{{text: s, sep: blockSep}}, nil
+}
+
+// paragraph packs the inline elements of a paragraph. An element is never cut,
+// so no bold, link or code marker is left open at the end of a message.
+func (r *renderer) paragraph(n ast.Node) ([]piece, error) {
+	var atoms []piece
+	for c := n.FirstChild(); c != nil; c = c.NextSibling() {
+		if t, ok := c.(*ast.Text); ok {
+			chunks := splitWords(string(t.Value(r.src)), r.limit)
+			for i, ch := range chunks {
+				s := Escape(ch)
+				if i == len(chunks)-1 && (t.HardLineBreak() || t.SoftLineBreak()) {
+					s += "\n"
+				}
+				atoms = append(atoms, piece{text: s})
+			}
+			continue
+		}
+		s := r.inlineNode(c)
+		if VisibleLen(s) > r.limit {
+			return nil, r.tooLong("a link, code span or emphasis")
+		}
+		atoms = append(atoms, piece{text: s})
+	}
+	parts := pack(atoms, r.limit, VisibleLen)
+	out := make([]piece, len(parts))
+	for i, p := range parts {
+		out[i] = piece{text: p}
+	}
+	if len(out) > 0 {
+		out[0].sep = "\n\n"
+	}
+	return out, nil
+}
+
+// splitWords cuts s into chunks of at most limit characters, at spaces when it can.
+func splitWords(s string, limit int) []string {
+	rs := []rune(s)
+	var out []string
+	for len(rs) > limit {
+		cut := limit
+		if i := lastSpace(rs[:limit]); i > 0 {
+			cut = i + 1
+		}
+		out = append(out, string(rs[:cut]))
+		rs = rs[cut:]
+	}
+	return append(out, string(rs))
+}
+
+func lastSpace(rs []rune) int {
+	for i := len(rs) - 1; i >= 0; i-- {
+		if rs[i] == ' ' || rs[i] == '\n' {
+			return i
+		}
+	}
+	return -1
+}
+
+var errCodeLimit = errors.New("the text limit is too small for a code block")
+
+// code splits a code block into fenced pieces that each fit the limit.
+func (r *renderer) code(n ast.Node) ([]piece, error) {
 	lang := ""
 	if f, ok := n.(*ast.FencedCodeBlock); ok {
-		lang = escapeSet(string(f.Language(r.src)), "`\\")
+		l := []rune(string(f.Language(r.src)))
+		lang = escapeSet(string(l[:min(len(l), maxLang)]), "`\\")
 	}
 	head, tail := "```"+lang+"\n", "\n```"
-	budget := r.limit - utf8.RuneCountInString(head+tail)
+	budget := r.limit - VisibleLen(head+tail)
+	if budget < 1 {
+		return nil, errCodeLimit
+	}
 
-	var lines []string
+	var lines []piece
 	segs := n.Lines()
 	for i := 0; i < segs.Len(); i++ {
 		seg := segs.At(i)
-		line := strings.TrimRight(string(seg.Value(r.src)), "\r\n")
-		line = escapeSet(line, "`\\")
-		// Cut a line that alone exceeds the budget.
-		for utf8.RuneCountInString(line) > budget {
-			cut := len(string([]rune(line)[:budget]))
-			lines = append(lines, line[:cut])
-			line = line[cut:]
+		raw := []rune(strings.TrimRight(string(seg.Value(r.src)), "\r\n"))
+		// Cut the raw line first, then escape. An escape never splits.
+		for len(raw) > budget {
+			lines = append(lines, piece{text: escapeSet(string(raw[:budget]), "`\\"), sep: "\n"})
+			raw = raw[budget:]
 		}
-		lines = append(lines, line)
+		lines = append(lines, piece{text: escapeSet(string(raw), "`\\"), sep: "\n"})
 	}
-	var out []string
-	for _, body := range pack(lines, "\n", budget) {
-		out = append(out, head+body+tail)
+	var out []piece
+	for _, body := range pack(lines, budget, VisibleLen) {
+		out = append(out, piece{text: head + body + tail, sep: "\n"})
 	}
 	if len(out) == 0 {
-		out = []string{head + tail}
+		out = []piece{{text: head + tail}}
 	}
-	return out
+	out[0].sep = "\n\n"
+	return out, nil
 }
 
 func (r *renderer) blockText(n ast.Node, depth int) string {
@@ -151,7 +259,7 @@ func (r *renderer) blockText(n ast.Node, depth int) string {
 		}
 		return strings.Join(lines, "\n")
 	case *ast.List:
-		return r.list(n, depth)
+		return strings.Join(r.listItems(n, depth), "\n")
 	case *ast.HTMLBlock:
 		var b strings.Builder
 		for i := 0; i < n.Lines().Len(); i++ {
@@ -160,7 +268,16 @@ func (r *renderer) blockText(n ast.Node, depth int) string {
 		}
 		return Escape(strings.TrimRight(b.String(), "\n"))
 	case *ast.FencedCodeBlock, *ast.CodeBlock:
-		return strings.Join(r.code(n), "\n")
+		// A code block inside a quote or list item stays whole.
+		parts, err := r.code(n)
+		if err != nil {
+			return ""
+		}
+		var s []string
+		for _, p := range parts {
+			s = append(s, p.text)
+		}
+		return strings.Join(s, "\n")
 	}
 	return r.children(n, depth)
 }
@@ -173,8 +290,9 @@ func (r *renderer) children(n ast.Node, depth int) string {
 	return strings.Join(parts, "\n\n")
 }
 
-func (r *renderer) list(l *ast.List, depth int) string {
-	var lines []string
+// listItems renders each item of l, with its marker and its nested lists.
+func (r *renderer) listItems(l *ast.List, depth int) []string {
+	var items []string
 	num := l.Start
 	indent := strings.Repeat("  ", depth)
 	for item := l.FirstChild(); item != nil; item = item.NextSibling() {
@@ -187,48 +305,54 @@ func (r *renderer) list(l *ast.List, depth int) string {
 		for c := item.FirstChild(); c != nil; c = c.NextSibling() {
 			body = append(body, r.blockText(c, depth+1))
 		}
-		text := strings.Join(body, "\n")
-		lines = append(lines, indent+marker+" "+text)
+		items = append(items, indent+marker+" "+strings.Join(body, "\n"))
 	}
-	return strings.Join(lines, "\n")
+	return items
 }
 
 func (r *renderer) inline(n ast.Node) string {
 	var b strings.Builder
 	for c := n.FirstChild(); c != nil; c = c.NextSibling() {
-		switch c := c.(type) {
-		case *ast.Text:
-			b.WriteString(Escape(string(c.Value(r.src))))
-			if c.HardLineBreak() || c.SoftLineBreak() {
-				b.WriteByte('\n')
-			}
-		case *ast.String:
-			b.WriteString(Escape(string(c.Value)))
-		case *ast.CodeSpan:
-			b.WriteString("`" + escapeSet(string(c.Text(r.src)), "`\\") + "`") //nolint:staticcheck // Text is the only accessor for code span content.
-		case *ast.Emphasis:
-			mark := "_"
-			if c.Level == 2 {
-				mark = "*"
-			}
-			b.WriteString(mark + r.inline(c) + mark)
-		case *extast.Strikethrough:
-			b.WriteString("~" + r.inline(c) + "~")
-		case *ast.Link:
-			b.WriteString("[" + r.inline(c) + "](" + escapeSet(string(c.Destination), ")\\") + ")")
-		case *ast.Image:
-			b.WriteString("[" + r.inline(c) + "](" + escapeSet(string(c.Destination), ")\\") + ")")
-		case *ast.AutoLink:
-			u := string(c.URL(r.src))
-			b.WriteString("[" + Escape(u) + "](" + escapeSet(u, ")\\") + ")")
-		case *ast.RawHTML:
-			for i := 0; i < c.Segments.Len(); i++ {
-				seg := c.Segments.At(i)
-				b.WriteString(Escape(string(seg.Value(r.src))))
-			}
-		default:
-			b.WriteString(r.inline(c))
-		}
+		b.WriteString(r.inlineNode(c))
 	}
 	return b.String()
+}
+
+// inlineNode renders one inline node with its children.
+func (r *renderer) inlineNode(c ast.Node) string {
+	switch c := c.(type) {
+	case *ast.Text:
+		s := Escape(string(c.Value(r.src)))
+		if c.HardLineBreak() || c.SoftLineBreak() {
+			s += "\n"
+		}
+		return s
+	case *ast.String:
+		return Escape(string(c.Value))
+	case *ast.CodeSpan:
+		return "`" + escapeSet(string(c.Text(r.src)), "`\\") + "`" //nolint:staticcheck // Text is the only accessor for code span content.
+	case *ast.Emphasis:
+		mark := "_"
+		if c.Level == 2 {
+			mark = "*"
+		}
+		return mark + r.inline(c) + mark
+	case *extast.Strikethrough:
+		return "~" + r.inline(c) + "~"
+	case *ast.Link:
+		return "[" + r.inline(c) + "](" + escapeSet(string(c.Destination), ")\\") + ")"
+	case *ast.Image:
+		return "[" + r.inline(c) + "](" + escapeSet(string(c.Destination), ")\\") + ")"
+	case *ast.AutoLink:
+		u := string(c.URL(r.src))
+		return "[" + Escape(u) + "](" + escapeSet(u, ")\\") + ")"
+	case *ast.RawHTML:
+		var b strings.Builder
+		for i := 0; i < c.Segments.Len(); i++ {
+			seg := c.Segments.At(i)
+			b.WriteString(Escape(string(seg.Value(r.src))))
+		}
+		return b.String()
+	}
+	return r.inline(c)
 }

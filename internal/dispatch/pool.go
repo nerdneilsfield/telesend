@@ -15,7 +15,10 @@ import (
 // Job is one API request.
 type Job struct {
 	Name string
+	// Size is the number of file bytes the job uploads. Zero for text and remote files.
+	Size int64
 	// Weight is the number of rpm slots the job uses. An album of n items uses n.
+	// The job starts at once when a slot is free. The next n slots stay closed.
 	// Zero means 1.
 	Weight int
 	// Run makes one attempt. It must open its inputs again on every call.
@@ -30,6 +33,10 @@ type Result struct {
 	Err      error
 	Attempts int
 	Skipped  bool
+	// Took is the duration of the last attempt.
+	Took time.Duration
+	// Bytes is the job Size.
+	Bytes int64
 }
 
 // Options configure Run.
@@ -41,6 +48,11 @@ type Options struct {
 	Timeout time.Duration
 	// BackoffBase is the first wait after a network error or 5xx reply. It doubles per retry.
 	BackoffBase time.Duration
+	// OnProgress reports the file bytes sent by the current attempt of job i.
+	// It gets 0 when an attempt starts. It may be nil. It runs on the upload goroutine.
+	OnProgress func(i int, sent int64)
+	// OnDone is called when job i has a final result, including a skipped job. It may be nil.
+	OnDone func(i int, r Result)
 	// OnAttempt is called after each attempt with its duration and error. It may be nil.
 	OnAttempt func(job string, attempt int, took time.Duration, err error)
 	// OnRetry is called before each wait. It may be nil.
@@ -64,12 +76,15 @@ func Run(ctx context.Context, jobs []Job, o Options) []Result {
 	for range min(o.Concurrency, len(jobs)) {
 		wg.Go(func() {
 			for i := range queue {
-				results[i] = runJob(ctx, jobs[i], lim, o)
+				results[i] = runJob(ctx, i, jobs[i], lim, o)
 				if results[i].Attempts == 0 && errors.Is(results[i].Err, context.Canceled) {
 					// The run stopped before this job made a request.
 					results[i] = Result{Name: jobs[i].Name, Skipped: true}
 				} else if results[i].Err != nil {
 					cancel()
+				}
+				if o.OnDone != nil {
+					o.OnDone(i, results[i])
 				}
 			}
 		})
@@ -87,22 +102,24 @@ feed:
 	return results
 }
 
-func runJob(ctx context.Context, j Job, lim *Limiter, o Options) Result {
-	res := Result{Name: j.Name}
+func runJob(ctx context.Context, idx int, j Job, lim *Limiter, o Options) Result {
+	res := Result{Name: j.Name, Bytes: j.Size}
 	for attempt := 0; ; attempt++ {
-		for range max(j.Weight, 1) {
-			if err := lim.Wait(ctx); err != nil {
-				res.Err = err
-				return res
-			}
+		if err := lim.Wait(ctx, j.Weight); err != nil {
+			res.Err = err
+			return res
 		}
 		res.Attempts++
 		actx, cancel := context.WithTimeout(ctx, o.Timeout)
+		if o.OnProgress != nil {
+			actx = telegram.WithProgress(actx, func(sent int64) { o.OnProgress(idx, sent) })
+		}
 		began := time.Now()
 		ids, err := j.Run(actx)
+		res.Took = time.Since(began)
 		cancel()
 		if o.OnAttempt != nil {
-			o.OnAttempt(j.Name, res.Attempts, time.Since(began), err)
+			o.OnAttempt(j.Name, res.Attempts, res.Took, err)
 		}
 		if err == nil {
 			res.IDs, res.Err = ids, nil
@@ -143,6 +160,10 @@ func retryPolicy(err error, attempt int, base time.Duration) (time.Duration, boo
 		if api.Code == 429 && api.RetryAfter > 0 {
 			return api.RetryAfter, true
 		}
+		return backoff(attempt, base), true
+	}
+	var te *telegram.TransportError
+	if errors.As(err, &te) {
 		return backoff(attempt, base), true
 	}
 	var pe *fs.PathError

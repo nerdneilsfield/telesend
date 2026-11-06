@@ -25,11 +25,11 @@ func newPhotoCmd() *cobra.Command {
 		short: "Send one photo or albums of photos",
 		long: `Send photos. SRC is a local path or an http(s) URL.
 
-One photo goes out as a single message. Several photos go out as albums of up
-to 10 photos. A caption appears on the first photo of the first album.
+One photo goes out as a single message. Several photos go out as albums.
+The caption appears on the first photo.
 
-Telegram recompresses photos and limits them to 10 MB. To keep the original
-quality, send the image with 'telesend file'.`,
+Telegram recompresses photos. To keep the original quality, send the image
+with 'telesend file'.`,
 		example: `  telesend photo cat.jpg
   telesend photo a.jpg b.jpg c.jpg --caption "Trip"
   telesend photo ./shots/*.png`,
@@ -43,9 +43,8 @@ func newVideoCmd() *cobra.Command {
 		short: "Send one video or albums of videos",
 		long: `Send videos. SRC is a local path or an http(s) URL.
 
-One video goes out as a single message. Several videos go out as albums of up
-to 10 videos. Videos play while they download. Bots upload up to 50 MB per file
-through api.telegram.org. Telegram plays MP4 (H.264) files inline.`,
+One video goes out as a single message. Several videos go out as albums.
+The caption appears on the first video. Telegram plays MP4 (H.264) files inline.`,
 		example: `  telesend video demo.mp4
   telesend video a.mp4 b.mp4 --caption "Demos"`,
 		need: "at least one video path or URL",
@@ -62,8 +61,8 @@ telesend tells photos from videos by the file extension.
 Photo extensions: .jpg .jpeg .png .webp .bmp
 Video extensions: .mp4 .mov .mkv .webm .avi .m4v
 
-Albums hold up to 10 items. More files make more albums, in the order given.
-A caption appears on the first item of the first album.`,
+Many files make several albums, in the order given. The caption appears on
+the first item.`,
 		example: `  telesend media a.jpg b.mp4 c.png --caption "Release 2"
   telesend media ./out/*`,
 		need: "at least one photo or video path or URL",
@@ -78,8 +77,7 @@ func newFileCmd() *cobra.Command {
 an http(s) URL.
 
 One file goes out as a single message. Several files go out as document
-albums of up to 10 files. A caption appears on the first file of the first album.
-Bots upload up to 50 MB per file through api.telegram.org.`,
+albums. The caption appears on the first file.`,
 		example: `  telesend file report.pdf
   telesend file a.zip b.zip --caption "Release build"
   telesend file ./logs/*.txt`,
@@ -110,28 +108,33 @@ func newAlbumCmd(sp albumSpec) *cobra.Command {
 	return c
 }
 
-// albumJobs groups media into albums of up to 10 items. One leftover item goes out alone.
+// albumJobs groups media into albums of s.cfg.AlbumSize items. One leftover item goes out alone.
 // Only the first job carries the caption.
 func albumJobs(s session, media []telegram.Media, names []string, opts telegram.Options) []dispatch.Job {
 	var jobs []dispatch.Job
-	for i := 0; i < len(media); i += telegram.MaxGroupMedia {
-		end := min(i+telegram.MaxGroupMedia, len(media))
+	size := s.cfg.AlbumSize
+	for i := 0; i < len(media); i += size {
+		end := min(i+size, len(media))
 		chunk := media[i:end]
+		var bytes int64
+		for _, m := range chunk {
+			bytes += fileSize(m)
+		}
 		o := opts
 		if i > 0 {
 			o.Caption, o.Markdown = "", false
 		}
 		if len(chunk) == 1 {
-			jobs = append(jobs, dispatch.Job{Name: fmt.Sprintf("%s %s", chunk[0].Kind, names[i]), Run: func(ctx context.Context) ([]int, error) {
+			jobs = append(jobs, dispatch.Job{Name: fmt.Sprintf("%s %s", kindLabel(chunk[0].Kind), names[i]), Size: bytes, Run: func(ctx context.Context) ([]int, error) {
 				return s.client.SendMedia(ctx, chunk[0], o)
 			}})
 			continue
 		}
 		name := fmt.Sprintf("album of %d", len(chunk))
-		if len(media) > telegram.MaxGroupMedia {
+		if len(media) > size {
 			name = fmt.Sprintf("album %d-%d of %d", i+1, end, len(media))
 		}
-		jobs = append(jobs, dispatch.Job{Name: name, Weight: len(chunk), Run: func(ctx context.Context) ([]int, error) {
+		jobs = append(jobs, dispatch.Job{Name: name, Weight: len(chunk), Size: bytes, Run: func(ctx context.Context) ([]int, error) {
 			return s.client.SendMediaGroup(ctx, chunk, o)
 		}})
 	}
@@ -146,9 +149,8 @@ func newVoiceCmd() *cobra.Command {
 		Long: `Send one audio file as a playable voice message. SRC is a local path or an
 http(s) URL.
 
-Telegram plays .ogg (Opus), .mp3 and .m4a files directly. For any other format
-(.wav, .flac, .aac ...) telesend converts the file to OGG/Opus with ffmpeg.
-An .ogg file that is not Opus arrives as a document, not as a voice message.`,
+.ogg (Opus), .mp3 and .m4a files go out as they are. For any other local
+format (.wav, .flac, .aac ...) telesend converts the file with ffmpeg.`,
 		Example: `  telesend voice note.ogg
   telesend voice meeting.wav --caption "Standup"`,
 		Args: func(cmd *cobra.Command, args []string) error {
@@ -168,13 +170,18 @@ An .ogg file that is not Opus arrives as a document, not as a voice message.`,
 					return nil, nil, err
 				}
 				cleanup := func() {}
+				if m.URL != "" {
+					if err = audio.CheckRemote(m.URL); err != nil {
+						return nil, nil, err
+					}
+				}
 				if m.Path != "" {
 					m.Path, cleanup, err = audio.PrepareVoice(ctx, m.Path)
 					if err != nil {
 						return nil, nil, err
 					}
 				}
-				job := dispatch.Job{Name: "voice " + args[0], Run: func(ctx context.Context) ([]int, error) {
+				job := dispatch.Job{Name: "voice " + args[0], Size: fileSize(m), Run: func(ctx context.Context) ([]int, error) {
 					return s.client.SendVoice(ctx, m, opts)
 				}}
 				return []dispatch.Job{job}, cleanup, nil
@@ -205,4 +212,12 @@ func parseAll(args []string, kind telegram.Kind) ([]telegram.Media, error) {
 		media[i] = m
 	}
 	return media, nil
+}
+
+// kindLabel is the word a user knows for a media kind.
+func kindLabel(k telegram.Kind) string {
+	if k == telegram.KindDocument {
+		return "file"
+	}
+	return string(k)
 }

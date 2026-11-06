@@ -40,6 +40,12 @@ func (e *APIError) Error() string {
 	return fmt.Sprintf("telegram: %d %s", e.Code, e.Description)
 }
 
+// TransportError is a failure to read a reply after the server accepted the request.
+type TransportError struct{ Err error }
+
+func (e *TransportError) Error() string { return "telegram: reading the reply: " + e.Err.Error() }
+func (e *TransportError) Unwrap() error { return e.Err }
+
 // Retryable reports whether the same request can succeed later.
 func (e *APIError) Retryable() bool {
 	return e.Code == http.StatusTooManyRequests || e.Code >= 500
@@ -109,7 +115,11 @@ func (c *Client) call(ctx context.Context, method string, fields map[string]stri
 	if err = mw.SetBoundary(boundary); err != nil {
 		return nil, err
 	}
-	go func() { _ = pw.CloseWithError(writeForm(mw, fields, files)) }()
+	progress := progressFrom(ctx)
+	if progress != nil {
+		progress(0)
+	}
+	go func() { _ = pw.CloseWithError(writeForm(mw, fields, files, progress)) }()
 
 	endpoint := c.BaseURL + "/bot" + c.Token + "/" + method
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, pr)
@@ -136,7 +146,7 @@ func (c *Client) call(ctx context.Context, method string, fields map[string]stri
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return nil, c.redact(err)
+		return nil, &TransportError{Err: c.redact(err)}
 	}
 	var reply struct {
 		OK          bool            `json:"ok"`
@@ -157,8 +167,9 @@ func (c *Client) call(ctx context.Context, method string, fields map[string]stri
 			code = resp.StatusCode
 		}
 		return nil, &APIError{
-			Code:        code,
-			Description: reply.Description,
+			Code: code,
+			// A gateway can echo the request path, which holds the token.
+			Description: strings.ReplaceAll(reply.Description, c.Token, "<token>"),
 			RetryAfter:  time.Duration(reply.Parameters.RetryAfter) * time.Second,
 		}
 	}
@@ -201,32 +212,39 @@ func (c *countWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func writeForm(mw *multipart.Writer, fields map[string]string, files []upload) error {
+func writeForm(mw *multipart.Writer, fields map[string]string, files []upload, progress func(int64)) error {
+	var done int64
 	for k, v := range fields {
 		if err := mw.WriteField(k, v); err != nil {
 			return err
 		}
 	}
 	for _, f := range files {
-		if err := writeFile(mw, f); err != nil {
+		n, err := writeFile(mw, f, done, progress)
+		if err != nil {
 			return err
 		}
+		done += n
 	}
 	return mw.Close()
 }
 
-func writeFile(mw *multipart.Writer, f upload) error {
+// writeFile copies one file into the form. It reports done plus the bytes copied so far.
+func writeFile(mw *multipart.Writer, f upload, done int64, progress func(int64)) (int64, error) {
 	file, err := os.Open(f.path)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer func() { _ = file.Close() }()
 	part, err := mw.CreateFormFile(f.field, filepath.Base(f.path))
 	if err != nil {
-		return err
+		return 0, err
 	}
-	_, err = io.Copy(part, file)
-	return err
+	var src io.Reader = file
+	if progress != nil {
+		src = &countReader{r: file, fn: func(n int64) { progress(done + n) }}
+	}
+	return io.Copy(part, src)
 }
 
 // redact removes the bot token from a transport error. The token is part of the URL path.

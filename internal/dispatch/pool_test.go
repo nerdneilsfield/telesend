@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"runtime"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -109,12 +110,79 @@ func TestServerErrorRetriesThenGivesUp(t *testing.T) {
 	}
 }
 
-func TestWeightUsesRPMSlots(t *testing.T) {
-	// 1200 rpm gives one slot per 50 ms. A job of weight 4 waits for 3 more slots after the first.
-	job := Job{Name: "album", Weight: 4, Run: func(context.Context) ([]int, error) { return nil, nil }}
+func TestWeightIsPaidAfterTheSend(t *testing.T) {
+	// 1200 rpm gives one slot per 50 ms. A job of weight 4 starts at once and closes 4 slots.
+	var mu sync.Mutex
+	var starts []time.Time
+	run := func(context.Context) ([]int, error) {
+		mu.Lock()
+		starts = append(starts, time.Now())
+		mu.Unlock()
+		return nil, nil
+	}
+	jobs := []Job{{Name: "album", Weight: 4, Run: run}, {Name: "next", Run: run}}
 	began := time.Now()
-	Run(context.Background(), []Job{job}, Options{Concurrency: 1, RPM: 1200, Timeout: time.Second, BackoffBase: time.Millisecond})
-	if d := time.Since(began); d < 140*time.Millisecond {
-		t.Errorf("weight 4 finished in %v; want >= ~150ms", d)
+	Run(context.Background(), jobs, Options{Concurrency: 1, RPM: 1200, Timeout: time.Second, BackoffBase: time.Millisecond})
+	if d := starts[0].Sub(began); d > 30*time.Millisecond {
+		t.Errorf("the album waited %v before its send; want it to start at once", d)
+	}
+	if gap := starts[1].Sub(starts[0]); gap < 180*time.Millisecond {
+		t.Errorf("next send came %v after a weight-4 album; want >= ~200ms", gap)
+	}
+}
+
+func TestEverySendClosesItsWeightInSlots(t *testing.T) {
+	// 1200 rpm is one slot per 50 ms. With three workers, each send must still start at
+	// least weight x 50 ms after the previous start. Over a minute that keeps
+	// the total at or under rpm, because the burst of an album is paid for after it.
+	const slot = 50 * time.Millisecond
+	var mu sync.Mutex
+	type send struct {
+		at time.Time
+		w  int
+	}
+	var sends []send
+	weights := []int{3, 1, 4, 2, 3, 1}
+	jobs := make([]Job, len(weights))
+	for i, w := range weights {
+		jobs[i] = Job{Name: "j", Weight: w, Run: func(context.Context) ([]int, error) {
+			mu.Lock()
+			sends = append(sends, send{time.Now(), w})
+			mu.Unlock()
+			return nil, nil
+		}}
+	}
+	Run(context.Background(), jobs, Options{Concurrency: 3, RPM: 1200, Timeout: time.Second, BackoffBase: time.Millisecond})
+	slices.SortFunc(sends, func(a, b send) int { return a.at.Compare(b.at) })
+	for i := 1; i < len(sends); i++ {
+		want := time.Duration(sends[i-1].w) * slot
+		if gap := sends[i].at.Sub(sends[i-1].at); gap < want-10*time.Millisecond {
+			t.Errorf("send %d started %v after a weight-%d send; want >= %v", i, gap, sends[i-1].w, want)
+		}
+	}
+}
+
+func TestAfter429PauseSendersStayEvenlySpaced(t *testing.T) {
+	lim := NewLimiter(600) // 100 ms per slot
+	lim.Pause(200 * time.Millisecond)
+	var mu sync.Mutex
+	var times []time.Time
+	var wg sync.WaitGroup
+	for range 3 {
+		wg.Go(func() {
+			if err := lim.Wait(context.Background(), 1); err != nil {
+				t.Error(err)
+			}
+			mu.Lock()
+			times = append(times, time.Now())
+			mu.Unlock()
+		})
+	}
+	wg.Wait()
+	slices.SortFunc(times, func(a, b time.Time) int { return a.Compare(b) })
+	for i := 1; i < len(times); i++ {
+		if gap := times[i].Sub(times[i-1]); gap < 80*time.Millisecond {
+			t.Errorf("senders %d and %d are only %v apart after a pause; want >= ~100ms", i-1, i, gap)
+		}
 	}
 }

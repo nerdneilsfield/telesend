@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -54,13 +53,19 @@ func runSend(cmd *cobra.Command, build builder) error {
 		return err
 	}
 
+	asJSON, _ := cmd.Flags().GetBool("json")
+	bar := newProgress(jobs, !asJSON && stderrIsTerminal())
+
 	log.Info("sending", zap.Int("jobs", len(jobs)))
+	began := time.Now()
 	results := dispatch.Run(cmd.Context(), jobs, dispatch.Options{
 		Concurrency: cfg.Concurrency,
 		RPM:         cfg.RPM,
 		Retries:     cfg.Retries,
 		Timeout:     cfg.Timeout,
 		BackoffBase: backoffBase,
+		OnProgress:  bar.onProgress,
+		OnDone:      bar.onDone,
 		OnAttempt: func(job string, attempt int, took time.Duration, err error) {
 			log.Debug("attempt", zap.String("job", job), zap.Int("attempt", attempt),
 				zap.Duration("took", took), zap.Bool("ok", err == nil))
@@ -70,6 +75,8 @@ func runSend(cmd *cobra.Command, build builder) error {
 				zap.Duration("wait", wait), zap.Error(err))
 		},
 	})
+	bar.finish()
+	sum := summarize(results, time.Since(began))
 
 	for _, r := range results {
 		switch {
@@ -82,44 +89,14 @@ func runSend(cmd *cobra.Command, build builder) error {
 		}
 	}
 
-	asJSON, _ := cmd.Flags().GetBool("json")
-	if err := report(cmd, results, asJSON); err != nil {
+	write := writeHuman
+	if asJSON {
+		write = writeJSON
+	}
+	if err := write(cmd.OutOrStdout(), results, sum); err != nil {
 		return err
 	}
 	return failure(results, cmd.Context().Err() != nil)
-}
-
-type jsonResult struct {
-	Name       string `json:"name"`
-	OK         bool   `json:"ok"`
-	MessageIDs []int  `json:"message_ids,omitempty"`
-	Attempts   int    `json:"attempts"`
-	Skipped    bool   `json:"skipped,omitempty"`
-	Error      string `json:"error,omitempty"`
-}
-
-func report(cmd *cobra.Command, results []dispatch.Result, asJSON bool) error {
-	out := cmd.OutOrStdout()
-	if asJSON {
-		list := make([]jsonResult, len(results))
-		for i, r := range results {
-			list[i] = jsonResult{Name: r.Name, OK: r.Err == nil && !r.Skipped, MessageIDs: r.IDs, Attempts: r.Attempts, Skipped: r.Skipped}
-			if r.Err != nil {
-				list[i].Error = r.Err.Error()
-			}
-		}
-		enc := json.NewEncoder(out)
-		enc.SetIndent("", "  ")
-		return enc.Encode(list)
-	}
-	for _, r := range results {
-		if r.Err == nil && !r.Skipped {
-			if _, err := fmt.Fprintf(out, "sent %s (message %s)\n", r.Name, telegram.String(r.IDs)); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
 }
 
 // failure summarizes failed and skipped jobs. It returns nil when all jobs were sent.
@@ -184,6 +161,18 @@ func (c captionOpts) options(chat string) (telegram.Options, error) {
 	return o, nil
 }
 
+// fileSize returns the size of a local file. It returns 0 for a URL.
+func fileSize(m telegram.Media) int64 {
+	if m.Path == "" {
+		return 0
+	}
+	info, err := os.Stat(m.Path)
+	if err != nil {
+		return 0
+	}
+	return info.Size()
+}
+
 // checkLocal fails early when a local file is missing, so no request is wasted on it.
 func checkLocal(m telegram.Media) error {
 	if m.URL != "" {
@@ -193,8 +182,8 @@ func checkLocal(m telegram.Media) error {
 	if err != nil {
 		return err
 	}
-	if info.IsDir() {
-		return fmt.Errorf("%s is a directory; pass a file", m.Path)
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("%s is not a regular file; pass a file", m.Path)
 	}
 	return nil
 }

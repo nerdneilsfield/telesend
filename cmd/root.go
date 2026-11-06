@@ -16,20 +16,15 @@ import (
 
 type loggerKey struct{}
 
-const rootLong = `Send text, files, photos and voice messages to a Telegram chat from a bot.
+const rootLong = `Send text, files, photos, videos and voice messages to a Telegram chat from a bot.
 
 Settings come from flags first, then from environment variables:
 
   --token     TELESEND_BOT_TOKEN   bot token from @BotFather
   --to, -t    TELESEND_CHAT_ID     recipient chat ID or @channel name
-  --base-url  TELESEND_BASE_URL    API address (default https://api.telegram.org)
 
-Requests are spaced evenly (--rpm) and run through a worker pool (--concurrency).
-An album of n items counts as n requests. A 429 reply pauses all workers for
-the time Telegram asks.
-
-Logs go to stderr. --log-level sets the level (default warn). -v and --verbose
-set it to debug. The bot token never appears in logs or errors.`
+In a terminal, telesend shows a progress bar. Add --json for output that a
+program can read. Add -v to see what telesend does.`
 
 const rootExample = `  export TELESEND_BOT_TOKEN=123456:ABC... TELESEND_CHAT_ID=987654321
   telesend text "Build finished"

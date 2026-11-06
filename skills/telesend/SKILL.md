@@ -39,15 +39,25 @@ Rules:
 2. "Send this file as a message" means the file content is the message: use `text --file`. "Attach", "upload", or "send the file" means a document: use `file`.
 3. Pass every file in one command. `telesend` splits long text at 4096 characters and packs files into albums of 10. Do not split them yourself.
 4. Send an image with `file` when the user wants the original quality or the image is larger than 10 MB.
-5. Quote every text argument. Use single quotes when the text contains `$` or backticks.
-6. Do not change `--rpm` or `--concurrency` unless the user asks.
+5. Change `--text-limit` (1 to 4096) or `--album-size` (2 to 10) only when the user asks.
+6. Quote every text argument. Use single quotes when the text contains `$` or backticks.
+7. Do not change `--rpm` or `--concurrency` unless the user asks.
 
 ## Read the result
 
-`--json` prints a list with one item per message or album. Each item has `name`, `ok`, `message_ids`, `attempts`, `error`, and `skipped`.
+`--json` prints one JSON object on stdout. These fields matter:
 
-1. Exit code 0 means every item has `ok: true`. Report the count and the `message_ids`.
-2. Exit code 1 means a failure. Report the `error` of the failed item. Report how many items were skipped.
+| Field | Meaning |
+| --- | --- |
+| `ok` | `true` when every message was sent. |
+| `sent`, `failed`, `skipped` | Counts of jobs. A job is one message or one album. |
+| `results[].name` | The job, for example `photo a.jpg` or `album 1-10 of 25`. |
+| `results[].message_ids` | The IDs of the messages that Telegram created. |
+| `results[].error` | The error. Present only when the job failed. |
+| `stats.elapsed_ms`, `stats.avg_speed_bps` | Total time and average upload speed. |
+
+1. Exit code 0 means `ok` is `true`. Report `sent` and the `message_ids`.
+2. Exit code 1 means a failure. Report the `error` of the failed job. Report `skipped`, the number of unsent jobs.
 3. Do not retry on your own. `telesend` already retries `429`, `5xx`, and network errors.
 
 ## Errors
@@ -58,8 +68,9 @@ Rules:
 | `400 ... chat not found` | Wrong chat ID, or the bot never received a message from that chat | Ask the user to check the ID and to message the bot first. |
 | `403 ... bot was blocked` | The user blocked the bot | Report it. |
 | `400 ... can't parse entities` | Invalid Markdown input | Send again without `--markdown`. |
-| `ffmpeg is not installed` | Voice file needs conversion | Ask the user to install `ffmpeg`, or send an `.ogg`, `.mp3`, or `.m4a` file. |
+| `ffmpeg is not installed` | Local voice file needs conversion | Ask the user to install `ffmpeg`, or send an `.ogg`, `.mp3`, or `.m4a` file. |
 | `cannot tell if ... photo or a video` | `media` got a file with an unknown extension | Use `telesend photo` or `telesend video`, or `telesend file`. |
+| `converts local files only` | A voice URL has an unsupported format | Download the file, then pass the local path. |
 | `caption has N characters` | Caption over 1024 characters | Shorten the caption, or send the text with `telesend text`. |
 
 ## Examples

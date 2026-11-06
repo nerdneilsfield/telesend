@@ -45,3 +45,32 @@ func TestDefaultsAndMissing(t *testing.T) {
 		t.Error("rpm 0 must fail")
 	}
 }
+
+func TestSizeSettings(t *testing.T) {
+	base := map[string]string{EnvToken: "t", EnvChatID: "1"}
+	c, err := resolve(t, base)
+	if err != nil || c.AlbumSize != 10 || c.TextLimit != 4096 {
+		t.Fatalf("defaults: %+v %v", c, err)
+	}
+
+	env := map[string]string{EnvToken: "t", EnvChatID: "1", EnvAlbumSize: "6", EnvTextLimit: "2000"}
+	c, err = resolve(t, env)
+	if err != nil || c.AlbumSize != 6 || c.TextLimit != 2000 {
+		t.Fatalf("env: %+v %v", c, err)
+	}
+	c, err = resolve(t, env, "--album-size", "4", "--text-limit", "500")
+	if err != nil || c.AlbumSize != 4 || c.TextLimit != 500 {
+		t.Fatalf("flag must beat env: %+v %v", c, err)
+	}
+
+	for _, bad := range []map[string]string{
+		{EnvToken: "t", EnvChatID: "1", EnvAlbumSize: "11"},
+		{EnvToken: "t", EnvChatID: "1", EnvAlbumSize: "1"},
+		{EnvToken: "t", EnvChatID: "1", EnvTextLimit: "5000"},
+		{EnvToken: "t", EnvChatID: "1", EnvTextLimit: "many"},
+	} {
+		if _, err := resolve(t, bad); err == nil {
+			t.Errorf("env %v must fail", bad)
+		}
+	}
+}

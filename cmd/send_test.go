@@ -26,6 +26,10 @@ type mock struct {
 	calls []call
 	// fail429 makes the first sendMessage answer 429 with retry_after 1.
 	fail429 bool
+	// failBody, when set, is the JSON error body with status 400 for every request.
+	failBody string
+	// truncateFirst makes the first reply stop in the middle of the body.
+	truncateFirst bool
 }
 
 func newMock(t *testing.T) *mock {
@@ -51,7 +55,21 @@ func newMock(t *testing.T) *mock {
 		first := len(m.calls) == 0
 		m.calls = append(m.calls, c)
 		m.mu.Unlock()
+		if m.truncateFirst && first {
+			conn, buf, err := w.(http.Hijacker).Hijack()
+			if err == nil {
+				_, _ = buf.WriteString("HTTP/1.1 200 OK\r\nContent-Length: 100\r\nContent-Type: application/json\r\n\r\n{\"ok\":")
+				_ = buf.Flush()
+				_ = conn.Close()
+			}
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
+		if m.failBody != "" {
+			w.WriteHeader(400)
+			_, _ = w.Write([]byte(m.failBody))
+			return
+		}
 		if m.fail429 && first {
 			w.WriteHeader(429)
 			_, _ = w.Write([]byte(`{"ok":false,"error_code":429,"description":"Too Many Requests: retry after 1","parameters":{"retry_after":1}}`))
@@ -69,7 +87,7 @@ func newMock(t *testing.T) *mock {
 
 func run(t *testing.T, env map[string]string, args ...string) (string, error) {
 	t.Helper()
-	for _, k := range []string{"TELESEND_BOT_TOKEN", "TELESEND_CHAT_ID", "TELESEND_BASE_URL"} {
+	for _, k := range []string{"TELESEND_BOT_TOKEN", "TELESEND_CHAT_ID", "TELESEND_BASE_URL", "TELESEND_ALBUM_SIZE", "TELESEND_TEXT_LIMIT"} {
 		t.Setenv(k, env[k])
 	}
 	var out bytes.Buffer
@@ -347,5 +365,165 @@ func TestLogFlags(t *testing.T) {
 	_, err := run(t, okEnv(m), "text", "hi", "--log-level", "loud")
 	if err == nil || !strings.Contains(err.Error(), "invalid log level") {
 		t.Errorf("bad level: %v", err)
+	}
+}
+
+func TestAlbumSizeFromFlagAndEnv(t *testing.T) {
+	names := make([]string, 7)
+	for i := range names {
+		names[i] = fmt.Sprintf("p%d.jpg", i)
+	}
+	files := touch(t, t.TempDir(), names...)
+	methods := func(m *mock) string {
+		var got []string
+		for _, c := range m.calls {
+			got = append(got, c.method)
+		}
+		return strings.Join(got, ",")
+	}
+
+	m := newMock(t)
+	if _, err := run(t, okEnv(m), append(append([]string{"photo"}, files...), "--album-size", "3", "--rpm", "1800")...); err != nil {
+		t.Fatal(err)
+	}
+	if got := methods(m); got != "sendMediaGroup,sendMediaGroup,sendPhoto" {
+		t.Errorf("--album-size 3: %s", got)
+	}
+	if n := len(m.calls[0].files); n != 3 {
+		t.Errorf("first album has %d files, want 3", n)
+	}
+
+	m = newMock(t)
+	env := okEnv(m)
+	env["TELESEND_ALBUM_SIZE"] = "4"
+	if _, err := run(t, env, append(append([]string{"photo"}, files...), "--rpm", "1800")...); err != nil {
+		t.Fatal(err)
+	}
+	if got := methods(m); got != "sendMediaGroup,sendMediaGroup" {
+		t.Errorf("env 4: %s", got)
+	}
+
+	_, err := run(t, okEnv(m), "photo", files[0], "--album-size", "11")
+	if err == nil || !strings.Contains(err.Error(), "--album-size") {
+		t.Errorf("album size 11 must fail: %v", err)
+	}
+}
+
+func TestTextLimitFromFlagAndEnv(t *testing.T) {
+	body := strings.Repeat("0123456789\n", 30) // 330 characters in 30 lines
+	for name, tc := range map[string]struct {
+		env  string
+		args []string
+	}{"flag": {"", []string{"--text-limit", "100"}}, "env": {"100", nil}} {
+		m := newMock(t)
+		env := okEnv(m)
+		if tc.env != "" {
+			env["TELESEND_TEXT_LIMIT"] = tc.env
+		}
+		if _, err := run(t, env, append([]string{"text", strings.TrimSuffix(body, "\n"), "--rpm", "1800"}, tc.args...)...); err != nil {
+			t.Fatal(err)
+		}
+		if len(m.calls) < 4 {
+			t.Errorf("%s: want a split into at least 4 messages, got %d", name, len(m.calls))
+		}
+		for _, c := range m.calls {
+			if n := len([]rune(c.form["text"])); n > 100 {
+				t.Errorf("%s: message of %d characters", name, n)
+			}
+		}
+	}
+}
+
+func TestOutputModes(t *testing.T) {
+	m := newMock(t)
+	file := touch(t, t.TempDir(), "a.pdf")[0]
+
+	human, err := run(t, okEnv(m), "file", file, "--rpm", "1800")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"sent file ", "message 5", "Sent 1 of 1 in", "Average request time"} {
+		if !strings.Contains(human, want) {
+			t.Errorf("human output lacks %q:\n%s", want, human)
+		}
+	}
+
+	out, err := run(t, okEnv(m), "file", file, "--json", "--rpm", "1800")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rep struct {
+		OK      bool `json:"ok"`
+		Sent    int  `json:"sent"`
+		Results []struct {
+			Name       string `json:"name"`
+			OK         bool   `json:"ok"`
+			MessageIDs []int  `json:"message_ids"`
+			Attempts   int    `json:"attempts"`
+			Bytes      int64  `json:"bytes"`
+		} `json:"results"`
+		Stats struct {
+			Requests int   `json:"requests"`
+			Bytes    int64 `json:"bytes"`
+		} `json:"stats"`
+	}
+	if err := json.Unmarshal([]byte(out), &rep); err != nil {
+		t.Fatalf("--json output is not one JSON object: %v\n%s", err, out)
+	}
+	if !rep.OK || rep.Sent != 1 || len(rep.Results) != 1 || rep.Results[0].MessageIDs[0] != 5 ||
+		rep.Results[0].Bytes != 1 || rep.Stats.Requests != 1 || rep.Stats.Bytes != 1 {
+		t.Errorf("report: %+v", rep)
+	}
+}
+
+func TestJSONReportsFailure(t *testing.T) {
+	m := newMock(t)
+	m.failBody = `{"ok":false,"error_code":400,"description":"Bad Request: chat not found"}`
+	out, err := run(t, okEnv(m), "text", "a", "--json", "--rpm", "1800")
+	if err == nil {
+		t.Fatal("want an error")
+	}
+	var rep struct {
+		OK      bool `json:"ok"`
+		Failed  int  `json:"failed"`
+		Results []struct {
+			Error string `json:"error"`
+		} `json:"results"`
+	}
+	if jerr := json.Unmarshal([]byte(out), &rep); jerr != nil || rep.OK || rep.Failed != 1 || !strings.Contains(rep.Results[0].Error, "chat not found") {
+		t.Errorf("report: %+v err %v\n%s", rep, jerr, out)
+	}
+}
+
+func TestTokenInAPIErrorDescriptionIsMasked(t *testing.T) {
+	m := newMock(t)
+	m.failBody = `{"ok":false,"error_code":400,"description":"bad path /botSECRET:TOKENVALUE/sendMessage"}`
+	env := okEnv(m)
+	env["TELESEND_BOT_TOKEN"] = "SECRET:TOKENVALUE"
+	out, err := run(t, env, "text", "a", "--json", "--rpm", "1800")
+	if err == nil || strings.Contains(err.Error(), "TOKENVALUE") || strings.Contains(out, "TOKENVALUE") {
+		t.Errorf("token leaked: err=%v out=%s", err, out)
+	}
+}
+
+func TestTruncatedReplyIsRetried(t *testing.T) {
+	m := newMock(t)
+	m.truncateFirst = true
+	if _, err := run(t, okEnv(m), "text", "hi", "--rpm", "1800"); err != nil {
+		t.Fatalf("a reply cut in the middle must be retried: %v", err)
+	}
+	if len(m.calls) != 2 {
+		t.Errorf("want 2 requests, got %d", len(m.calls))
+	}
+}
+
+func TestRemoteVoiceNeedingConversionIsRejected(t *testing.T) {
+	m := newMock(t)
+	_, err := run(t, okEnv(m), "voice", "https://example.com/note.wav")
+	if err == nil || !strings.Contains(err.Error(), "converts local files only") || len(m.calls) != 0 {
+		t.Errorf("err=%v calls=%d", err, len(m.calls))
+	}
+	if _, err := run(t, okEnv(m), "voice", "https://example.com/note.ogg", "--rpm", "1800"); err != nil {
+		t.Errorf("a remote .ogg must pass: %v", err)
 	}
 }

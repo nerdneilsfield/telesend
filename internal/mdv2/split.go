@@ -17,5 +17,30 @@ func Split(s string, limit int) []string {
 		}
 		lines = append(lines, l)
 	}
-	return pack(lines, "\n", limit)
+	pieces := make([]piece, len(lines))
+	for i, l := range lines {
+		pieces[i] = piece{text: l, sep: "\n"}
+	}
+	return packRaw(pieces, limit)
+}
+
+// packRaw is pack for plain text: it keeps spaces and counts runes.
+func packRaw(pieces []piece, limit int) []string {
+	var out []string
+	cur, started := "", false
+	for _, p := range pieces {
+		switch {
+		case !started:
+			cur, started = p.text, true
+		case utf8.RuneCountInString(cur+p.sep+p.text) <= limit:
+			cur += p.sep + p.text
+		default:
+			out = append(out, cur)
+			cur = p.text
+		}
+	}
+	if started {
+		out = append(out, cur)
+	}
+	return out
 }

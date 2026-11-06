@@ -11,7 +11,6 @@ import (
 
 	"github.com/dengqi/telesend/internal/dispatch"
 	"github.com/dengqi/telesend/internal/mdv2"
-	"github.com/dengqi/telesend/internal/telegram"
 )
 
 func newTextCmd() *cobra.Command {
@@ -23,13 +22,12 @@ func newTextCmd() *cobra.Command {
 		Long: `Send a text message.
 
 Pass the text as arguments, read it from a file with --file, or pipe it on
-stdin. A text longer than 4096 characters is split at line ends into several
-messages, which arrive in order. The file is sent as message text, not as an
-attachment. To attach a file, use 'telesend file'.
+stdin. A long text is split into several messages, which arrive in order.
+--file sends the content of the file as the message. To attach the file, use
+'telesend file'.
 
-With --markdown, telesend converts CommonMark (headings, **bold**, *italic*,
-~~strike~~, lists, quotes, links, code) to Telegram MarkdownV2 and escapes
-every reserved character.`,
+With --markdown, telesend formats headings, **bold**, *italic*, ~~strike~~,
+lists, quotes, links and code.`,
 		Example: `  telesend text "Build finished"
   telesend text --file notes.md --markdown
   telesend text --markdown "# Report\n\n- **ok**: 12\n- failed: 0"
@@ -42,12 +40,12 @@ every reserved character.`,
 			return runSend(cmd, func(_ context.Context, s session) ([]dispatch.Job, func(), error) {
 				var pieces []string
 				if markdown {
-					pieces, err = mdv2.Convert(body, telegram.MaxText)
+					pieces, err = mdv2.Convert(body, s.cfg.TextLimit)
 					if err != nil {
 						return nil, nil, err
 					}
 				} else {
-					pieces = mdv2.Split(body, telegram.MaxText)
+					pieces = mdv2.Split(body, s.cfg.TextLimit)
 				}
 				jobs := make([]dispatch.Job, len(pieces))
 				for i, p := range pieces {
