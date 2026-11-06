@@ -3,6 +3,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 
@@ -83,7 +84,22 @@ func NewRootCmd() *cobra.Command {
 
 // Execute runs the root command with ctx, which is canceled on SIGINT/SIGTERM.
 func Execute(ctx context.Context) error {
-	return NewRootCmd().ExecuteContext(ctx)
+	return executeRoot(ctx, NewRootCmd())
+}
+
+// executeRoot runs root and hides the bot token in the error. A flag parse error
+// or a validation error can quote the argument that the user typed, and that
+// argument can be the token.
+func executeRoot(ctx context.Context, root *cobra.Command) error {
+	err := root.ExecuteContext(ctx)
+	if err == nil {
+		return nil
+	}
+	secrets := logging.Secrets(config.Token(root.PersistentFlags(), os.Getenv))
+	if text := logging.MaskString(err.Error(), secrets...); text != err.Error() {
+		return errors.New(text)
+	}
+	return err
 }
 
 func loggerFrom(cmd *cobra.Command) *zap.Logger {

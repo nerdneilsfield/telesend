@@ -109,22 +109,16 @@ func (p *progress) finish() {
 	fmt.Fprintln(os.Stderr)
 }
 
-// pause clears the bar, so a line can print in its place.
-func (p *progress) pause() {
+// withCleared clears the bar, runs fn, and draws the bar again. It holds the bar
+// lock throughout, so no progress update can redraw the bar in the middle of fn.
+func (p *progress) withCleared(fn func()) {
 	if p == nil {
+		fn()
 		return
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	_ = p.bar.Clear()
-}
-
-// resume draws the bar again after a line was printed.
-func (p *progress) resume() {
-	if p == nil {
-		return
-	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	fn()
 	_ = p.bar.RenderBlank()
 }

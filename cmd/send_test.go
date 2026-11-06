@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	"github.com/nerdneilsfield/telesend/internal/config"
+	"github.com/nerdneilsfield/telesend/internal/dispatch"
 	"github.com/nerdneilsfield/telesend/internal/telegram"
 )
 
@@ -101,7 +103,7 @@ func run(t *testing.T, env map[string]string, args ...string) (string, error) {
 	root.SetOut(&out)
 	root.SetErr(&out)
 	root.SetArgs(args)
-	err := root.Execute()
+	err := executeRoot(context.Background(), root)
 	return out.String(), err
 }
 
@@ -677,5 +679,98 @@ func TestWriteErrorOfSentLineIsReturned(t *testing.T) {
 	root.SetArgs([]string{"text", "hi", "--rpm", "1800"})
 	if err := root.Execute(); err == nil || !strings.Contains(err.Error(), "disk full") {
 		t.Errorf("a lost output line must not end as success: %v", err)
+	}
+}
+
+func TestTokenTypedAsWrongArgumentIsMasked(t *testing.T) {
+	m := newMock(t)
+	env := okEnv(m)
+	env["TELESEND_BOT_TOKEN"] = "123456:SECRETSECRET"
+	_, err := run(t, env, "text", "hi", "--log-level", "123456:SECRETSECRET")
+	if err == nil || strings.Contains(err.Error(), "SECRETSECRET") {
+		t.Errorf("want an error without the token: %v", err)
+	}
+	_, err = run(t, env, "text", "hi", "--timeout", "123456:SECRETSECRET")
+	if err == nil || strings.Contains(err.Error(), "SECRETSECRET") {
+		t.Errorf("want an error without the token: %v", err)
+	}
+}
+
+func TestTextCanStartWithADash(t *testing.T) {
+	m := newMock(t)
+	if _, err := run(t, okEnv(m), "text", "--rpm", "1800", "--", "--help"); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.calls) != 1 || m.calls[0].form["text"] != "--help" {
+		t.Errorf("calls: %+v", m.calls)
+	}
+}
+
+func TestBlankTextIsRejectedOnEveryPath(t *testing.T) {
+	m := newMock(t)
+	for _, args := range [][]string{
+		{"text", "   "},
+		{"text", "--markdown", "   ", "--json"},
+	} {
+		_, err := run(t, okEnv(m), append(args, "--rpm", "1800")...)
+		if err == nil {
+			t.Errorf("%v: blank text must fail, not report success", args)
+		}
+	}
+	if len(m.calls) != 0 {
+		t.Errorf("nothing may be sent, got %d calls", len(m.calls))
+	}
+}
+
+func TestSplitNeverSendsAnEmptyMessage(t *testing.T) {
+	m := newMock(t)
+	if _, err := run(t, okEnv(m), "text", "--text-limit", "1", "--rpm", "1800", "a\n\nb"); err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, c := range m.calls {
+		got = append(got, c.form["text"])
+	}
+	if strings.Join(got, "|") != "a|b" {
+		t.Errorf("messages: %q", got)
+	}
+}
+
+func TestReadingStdinEndsOnSignal(t *testing.T) {
+	pr, pw, err := os.Pipe() // The writer stays open, so stdin never reaches EOF.
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pw.Close()
+	defer pr.Close()
+	cmd := newTextCmd()
+	cmd.SetIn(pr)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := readText(ctx, cmd, nil, "-")
+		done <- err
+	}()
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("want context.Canceled, got %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("readText kept waiting for stdin after the signal")
+	}
+}
+
+func TestLateSignalDoesNotTurnSuccessIntoFailure(t *testing.T) {
+	sent := []dispatch.Result{{Name: "a"}, {Name: "b"}}
+	if err := failure(sent, true); err != nil {
+		t.Errorf("every job was sent; a late signal must not fail the run: %v", err)
+	}
+	mixed := []dispatch.Result{{Name: "a"}, {Name: "b", Err: context.Canceled}, {Name: "c", Skipped: true}}
+	err := failure(mixed, true)
+	if err == nil || !strings.Contains(err.Error(), "interrupted") || !strings.Contains(err.Error(), "2 job(s) not sent") {
+		t.Errorf("an interrupted run: %v", err)
 	}
 }

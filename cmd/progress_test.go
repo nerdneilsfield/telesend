@@ -41,8 +41,7 @@ func TestProgressCountsJobsForText(t *testing.T) {
 		t.Fatal("jobs without files must count jobs, not bytes")
 	}
 	p.onDone(0, dispatch.Result{Name: "t1"})
-	p.pause()
-	p.resume()
+	p.withCleared(func() {})
 	p.onDone(1, dispatch.Result{Name: "t2"})
 	p.finish()
 	if !strings.Contains(buf.String(), "2/2") {
@@ -57,8 +56,7 @@ func TestProgressIsOffWhenDisabled(t *testing.T) {
 	var p *progress
 	p.onProgress(0, 1) // A nil bar must accept every call.
 	p.onDone(0, dispatch.Result{})
-	p.pause()
-	p.resume()
+	p.withCleared(func() {})
 	p.finish()
 }
 

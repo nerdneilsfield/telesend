@@ -33,8 +33,8 @@ lists, quotes, links and code.`,
   telesend text --markdown "# Report\n\n- **ok**: 12\n- failed: 0"
   git log -5 --oneline | telesend text`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runSend(cmd, func(_ context.Context, s session) ([]dispatch.Job, func(), error) {
-				body, err := readText(cmd, args, file)
+			return runSend(cmd, func(ctx context.Context, s session) ([]dispatch.Job, func(), error) {
+				body, err := readText(ctx, cmd, args, file)
 				if err != nil {
 					return nil, nil, usageErr(cmd, err)
 				}
@@ -67,17 +67,21 @@ lists, quotes, links and code.`,
 }
 
 // readText takes the text from --file, from args, or from stdin when neither is given.
-func readText(cmd *cobra.Command, args []string, file string) (string, error) {
+// A signal ends the wait for stdin.
+func readText(ctx context.Context, cmd *cobra.Command, args []string, file string) (string, error) {
 	if file != "" && len(args) > 0 {
 		return "", fmt.Errorf("give the text as arguments or with --file, not both")
 	}
-	var b []byte
-	var err error
+	var raw string
 	switch {
 	case file != "" && file != "-":
-		b, err = os.ReadFile(file)
+		b, err := os.ReadFile(file)
+		if err != nil {
+			return "", err
+		}
+		raw = string(b)
 	case len(args) > 0 && (len(args) != 1 || args[0] != "-"):
-		return strings.Join(args, " "), nil
+		raw = strings.Join(args, " ")
 	default:
 		in := cmd.InOrStdin()
 		if f, ok := in.(*os.File); ok && len(args) == 0 && file == "" {
@@ -85,14 +89,35 @@ func readText(cmd *cobra.Command, args []string, file string) (string, error) {
 				return "", fmt.Errorf("text needs a message argument, --file, or piped stdin")
 			}
 		}
-		b, err = io.ReadAll(in)
+		b, err := readAll(ctx, in)
+		if err != nil {
+			return "", err
+		}
+		raw = string(b)
 	}
-	if err != nil {
-		return "", err
-	}
-	body := strings.TrimRight(string(b), "\r\n")
+	body := strings.TrimRight(raw, "\r\n")
 	if strings.TrimSpace(body) == "" {
 		return "", fmt.Errorf("the text is empty")
 	}
 	return body, nil
+}
+
+// readAll reads r to the end, or returns when ctx ends. A read that is still blocked
+// keeps its goroutine until the process exits, which happens right after the error.
+func readAll(ctx context.Context, r io.Reader) ([]byte, error) {
+	type result struct {
+		b   []byte
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		b, err := io.ReadAll(r)
+		done <- result{b, err}
+	}()
+	select {
+	case res := <-done:
+		return res.b, res.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }

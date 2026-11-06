@@ -92,11 +92,11 @@ func runSend(cmd *cobra.Command, build builder) error {
 			r.Name = hide(r.Name)
 			outMu.Lock()
 			defer outMu.Unlock()
-			bar.pause()
-			if _, err := fmt.Fprintln(out, humanLine(r)); err != nil && lineErr == nil {
-				lineErr = err
-			}
-			bar.resume()
+			bar.withCleared(func() {
+				if _, err := fmt.Fprintln(out, humanLine(r)); err != nil && lineErr == nil {
+					lineErr = err
+				}
+			})
 		},
 		OnAttempt: func(job string, attempt int, took time.Duration, err error) {
 			log.Debug("attempt", zap.String("job", job), zap.Int("attempt", attempt),
@@ -150,29 +150,30 @@ func hideResults(results []dispatch.Result, hide func(string) string) {
 	}
 }
 
-// failure summarizes failed and skipped jobs. It returns nil when all jobs were sent.
+// failure summarizes failed and unsent jobs. It returns nil when all jobs were sent,
+// even if a signal arrived after the last job finished.
 // interrupted is true when the user stopped the run with a signal.
 func failure(results []dispatch.Result, interrupted bool) error {
 	var errs []error
-	skipped := 0
+	unsent := 0
 	for _, r := range results {
 		switch {
 		case r.Skipped:
-			skipped++
+			unsent++
 		case interrupted && errors.Is(r.Err, context.Canceled):
-			// The signal, not the job, caused this error.
+			unsent++ // The signal, not the job, ended it.
 		case r.Err != nil:
 			errs = append(errs, fmt.Errorf("%s: %w", r.Name, r.Err))
 		}
 	}
+	if len(errs) == 0 && unsent == 0 {
+		return nil
+	}
 	if interrupted {
 		errs = append([]error{errors.New("interrupted")}, errs...)
 	}
-	if len(errs) == 0 && skipped == 0 {
-		return nil
-	}
-	if skipped > 0 {
-		errs = append(errs, fmt.Errorf("%d job(s) not sent", skipped))
+	if unsent > 0 {
+		errs = append(errs, fmt.Errorf("%d job(s) not sent", unsent))
 	}
 	return errors.Join(errs...)
 }
