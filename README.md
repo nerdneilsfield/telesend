@@ -1,42 +1,158 @@
-# go-template
+# telesend
 
-My Go CLI project template: cobra, zap, golangci-lint v2, GoReleaser v2, GitHub Actions and a distroless Docker image.
+[简体中文](README.zh-CN.md)
 
-## Layout
+A command-line tool that sends text, Markdown, files, photos, albums, and voice messages from a Telegram bot to a chat.
+
+- Sends through a worker pool. A shared limiter spaces requests at a fixed rate per minute.
+- Pauses all workers when Telegram answers `429`, for the time that Telegram asks.
+- Retries `5xx` replies and network errors with exponential backoff.
+- Converts CommonMark to Telegram MarkdownV2 and escapes every reserved character.
+- Packs photos into albums of up to 10. Converts audio to OGG/Opus with `ffmpeg`.
+- Works with a custom API address, for example a self-hosted `telegram-bot-api` server.
 
 ```
-main.go                 signal handling, calls cmd.Execute
-cmd/                    cobra commands
-internal/buildinfo/     version, commit and date injected with -ldflags
-internal/logging/       zap logger writing to stderr
+telesend text --markdown "**Deploy** finished: [log](https://example.com/log)"
 ```
 
-## Starting a new project
+## Install
 
-1. Replace `github.com/nerdneilsfield/go-template` and `go-template` everywhere with the new module path and binary name.
-2. Run `go mod tidy`.
-3. Run `make check`.
+Requirements: Go 1.27 or later. `ffmpeg` is optional. `telesend voice` needs it for files that are not `.ogg`, `.mp3`, or `.m4a`.
 
-## Commands
+```
+go install github.com/dengqi/telesend@latest
+```
 
-`make` and `just` provide the same targets:
+To build from a clone, run `make build`. The binary is `./telesend`.
 
-| Target | Description |
+## Quick start
+
+1. Create a bot with [@BotFather](https://t.me/BotFather). Copy the bot token.
+2. Open a chat with the bot and send it any message. A bot cannot start a chat.
+3. Find your chat ID. Open `https://api.telegram.org/bot<token>/getUpdates` and read `message.chat.id`.
+   Replace `<token>` with your bot token.
+4. Set the token and the chat ID.
+
+   ```
+   export TELESEND_BOT_TOKEN='<token>'
+   export TELESEND_CHAT_ID='<chat-id>'
+   ```
+
+5. Send a message.
+
+   ```
+   telesend text "Hello from telesend"
+   ```
+
+The command prints `sent text (message <id>)`. The message appears in the chat.
+
+## Usage
+
+Each command sends one kind of content.
+
+| Command | What it sends |
 | --- | --- |
-| `build` | Build the binary with version info |
-| `hooks` | Install the Git hooks |
-| `test` | Run tests with coverage |
-| `fmt` / `fmt-check` | Format with gofumpt and goimports (via `go tool`) |
-| `lint` | Run golangci-lint |
-| `check` | fmt-check, lint, vet, test and `goreleaser check` |
-| `release-test` | Build a local snapshot release |
+| `telesend text [TEXT...]` | A text message. Reads stdin when you give no text. |
+| `telesend photo SRC...` | One photo, or albums of up to 10 photos. |
+| `telesend file SRC...` | Files as documents, without recompression. |
+| `telesend voice SRC` | An audio file as a playable voice message. |
 
-golangci-lint and goreleaser are installed separately. gofumpt, goimports and lefthook are `tool` dependencies in `go.mod`.
+`SRC` is a local path or an `http(s)` URL.
 
-The Git hooks check staged Go files with gofumpt and goimports, and check `go.mod`/`go.sum` with `go mod tidy -diff` when either file is staged. The commit-msg hook accepts Conventional Commit messages and allows Git merge and revert messages.
+```
+telesend text --markdown "# Report\n\n- **ok**: 12\n- failed: 0"
+git log -5 --oneline | telesend text
+telesend photo a.jpg b.jpg c.jpg --caption "Trip"
+telesend file report.pdf --caption "Q3 report"
+telesend voice meeting.wav
+```
 
-## Release
+Add `--json` to print one JSON object per job. The object has `name`, `ok`, `message_ids`, `attempts`, and `error`.
 
-Push a `v*` tag. The release workflow runs GoReleaser, publishes binaries and Docker images to GHCR and Docker Hub, and attests the binaries and images.
+Run `telesend <command> --help` for the flags and examples of one command.
 
-The workflow needs the repository secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`. Without them the Docker Hub login step fails and nothing is released. To publish only to GHCR, remove the Docker Hub login step and the `nerdneils/go-template` image from `.goreleaser.yml`.
+### Markdown
+
+`--markdown` (`-m`) parses the input as CommonMark and writes MarkdownV2.
+
+| Input | Telegram shows |
+| --- | --- |
+| `# Title`, `## Title` | Bold line |
+| `**bold**`, `*italic*`, `~~strike~~` | Bold, italic, strikethrough |
+| `` `code` `` and fenced code blocks | Monospace |
+| `- item`, `1. item` | Bullet list, numbered list |
+| `> quote` | Quote |
+| `[text](url)` | Link |
+
+Tables, task lists, and images have no MarkdownV2 form. Images become links. A table becomes plain text.
+
+### Limits that telesend enforces
+
+| Limit | Value | Behavior |
+| --- | --- | --- |
+| Text length | 4096 characters | Splits at line ends, or between Markdown blocks. |
+| Caption length | 1024 characters | Stops with an error. |
+| Album size | 10 photos | Starts a new album. |
+
+A line longer than 4096 characters in Markdown mode stops with an error. Break the line up.
+
+## Configuration
+
+A flag overrides the environment variable. The environment variable overrides the default.
+
+| Flag | Environment variable | Default | Meaning |
+| --- | --- | --- | --- |
+| `--token` | `TELESEND_BOT_TOKEN` | none (required) | Bot token. |
+| `--to`, `-t` | `TELESEND_CHAT_ID` | none (required) | Chat ID, or `@channelname`. |
+| `--base-url` | `TELESEND_BASE_URL` | `https://api.telegram.org` | Bot API address. |
+| `--rpm` | none | `20` | Maximum requests per minute, 1 to 1800. |
+| `--concurrency` | none | `1` | Requests in flight, 1 to 16. |
+| `--retries` | none | `3` | Retries after `429`, `5xx`, or a network error. |
+| `--timeout` | none | `2m` | Time limit for one attempt. |
+| `--verbose`, `-v` | none | off | Debug logging on stderr. |
+
+### Rate limits
+
+Telegram allows about 1 message per second to one chat, 20 messages per minute to one group, and about 30 messages per second across all chats.
+The default of 20 requests per minute stays under the group limit.
+For a private chat, raise `--rpm` to 60.
+
+`--rpm` sets the spacing between requests: 60 ÷ `rpm` seconds. The limiter sends the first request at once.
+
+With `--concurrency` above 1, messages can arrive out of order. Keep the default of 1 when order matters.
+
+After the first failed job, telesend starts no more jobs. It reports the failure and the number of unsent jobs, and it exits with code 1.
+
+A retry after a timeout can send a duplicate when Telegram received the first request.
+
+### Voice formats
+
+Telegram plays `.ogg` (Opus), `.mp3`, and `.m4a` files as voice messages. telesend uploads these files as they are.
+It converts every other format with `ffmpeg -c:a libopus -b:a 32k -ar 48000 -ac 1`.
+An `.ogg` file that holds Vorbis audio arrives as a document, not as a voice message.
+
+## Use with an AI agent
+
+`skills/telesend/SKILL.md` is a Claude Code skill. It maps natural-language requests to `telesend` commands.
+
+1. Install `telesend` and set the environment variables.
+2. Copy the skill to your skills directory.
+
+   ```
+   cp -r skills/telesend ~/.claude/skills/
+   ```
+
+3. Ask the agent, for example: "Send build.log to Telegram."
+
+## Development
+
+```
+make check
+```
+
+`make check` runs the format check, `golangci-lint`, `go vet`, the tests, and `goreleaser check`.
+The tests use a mock Telegram server. They need no token and no network.
+
+## License
+
+[MIT](LICENSE)
