@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dengqi/telesend/internal/dispatch"
+	"github.com/nerdneilsfield/telesend/internal/dispatch"
 )
 
 func TestProgressCountsBytesAndResetsOnRetry(t *testing.T) {

@@ -14,7 +14,7 @@ telesend photo a.jpg b.jpg c.jpg --caption "Trip"
 需要 Go 1.27 或更高版本。
 
 ```
-go install github.com/dengqi/telesend@latest
+go install github.com/nerdneilsfield/telesend@latest
 ```
 
 ## 快速开始

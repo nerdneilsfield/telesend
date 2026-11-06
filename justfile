@@ -1,5 +1,5 @@
 projectname := "telesend"
-pkg := "github.com/dengqi/telesend"
+pkg := "github.com/nerdneilsfield/telesend"
 version := `git describe --tags --always --dirty 2>/dev/null || echo dev`
 commit := `git rev-parse --short HEAD 2>/dev/null || echo none`
 date := `date -u +%Y-%m-%dT%H:%M:%SZ`

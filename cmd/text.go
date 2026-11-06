@@ -9,8 +9,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dengqi/telesend/internal/dispatch"
-	"github.com/dengqi/telesend/internal/mdv2"
+	"github.com/nerdneilsfield/telesend/internal/dispatch"
+	"github.com/nerdneilsfield/telesend/internal/mdv2"
 )
 
 func newTextCmd() *cobra.Command {

@@ -10,9 +10,9 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
-	"github.com/dengqi/telesend/internal/buildinfo"
-	"github.com/dengqi/telesend/internal/config"
-	"github.com/dengqi/telesend/internal/logging"
+	"github.com/nerdneilsfield/telesend/internal/buildinfo"
+	"github.com/nerdneilsfield/telesend/internal/config"
+	"github.com/nerdneilsfield/telesend/internal/logging"
 )
 
 type loggerKey struct{}

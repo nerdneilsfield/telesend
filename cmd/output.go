@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dengqi/telesend/internal/dispatch"
-	"github.com/dengqi/telesend/internal/telegram"
+	"github.com/nerdneilsfield/telesend/internal/dispatch"
+	"github.com/nerdneilsfield/telesend/internal/telegram"
 )
 
 // stats summarizes a run.

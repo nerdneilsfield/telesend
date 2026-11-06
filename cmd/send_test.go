@@ -15,8 +15,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dengqi/telesend/internal/config"
-	"github.com/dengqi/telesend/internal/telegram"
+	"github.com/nerdneilsfield/telesend/internal/config"
+	"github.com/nerdneilsfield/telesend/internal/telegram"
 )
 
 // call is one request that reached the mock Telegram server.

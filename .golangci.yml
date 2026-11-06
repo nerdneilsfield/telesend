@@ -11,7 +11,7 @@ formatters:
   settings:
     goimports:
       local-prefixes:
-        - github.com/dengqi/telesend
+        - github.com/nerdneilsfield/telesend
 
 linters:
   default: standard

@@ -11,9 +11,9 @@ builds:
     mod_timestamp: "{{ .CommitTimestamp }}"
     ldflags:
       - -s -w
-      - -X github.com/dengqi/telesend/internal/buildinfo.Version={{.Version}}
-      - -X github.com/dengqi/telesend/internal/buildinfo.Commit={{.FullCommit}}
-      - -X github.com/dengqi/telesend/internal/buildinfo.Date={{.Date}}
+      - -X github.com/nerdneilsfield/telesend/internal/buildinfo.Version={{.Version}}
+      - -X github.com/nerdneilsfield/telesend/internal/buildinfo.Commit={{.FullCommit}}
+      - -X github.com/nerdneilsfield/telesend/internal/buildinfo.Date={{.Date}}
     goos:
       - linux
       - darwin
@@ -33,7 +33,7 @@ archives:
 
 release:
   github:
-    owner: dengqi
+    owner: nerdneilsfield
     name: telesend
 
 dockers_v2:
@@ -42,8 +42,8 @@ dockers_v2:
     ids:
       - telesend
     images:
-      - dengqi/telesend
-      - ghcr.io/dengqi/telesend
+      - nerdneils/telesend
+      - ghcr.io/nerdneilsfield/telesend
     tags:
       - "{{ .Tag }}"
       - "{{ if not .IsNightly }}latest{{ end }}"

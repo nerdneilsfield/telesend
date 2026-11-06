@@ -6,9 +6,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dengqi/telesend/internal/audio"
-	"github.com/dengqi/telesend/internal/dispatch"
-	"github.com/dengqi/telesend/internal/telegram"
+	"github.com/nerdneilsfield/telesend/internal/audio"
+	"github.com/nerdneilsfield/telesend/internal/dispatch"
+	"github.com/nerdneilsfield/telesend/internal/telegram"
 )
 
 // albumSpec describes a command that sends photos, videos or documents.

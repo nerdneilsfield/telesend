@@ -14,7 +14,7 @@ telesend photo a.jpg b.jpg c.jpg --caption "Trip"
 You need Go 1.27 or later.
 
 ```
-go install github.com/dengqi/telesend@latest
+go install github.com/nerdneilsfield/telesend@latest
 ```
 
 ## Quick start

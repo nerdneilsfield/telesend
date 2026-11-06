@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dengqi/telesend/internal/telegram"
+	"github.com/nerdneilsfield/telesend/internal/telegram"
 )
 
 func TestRunHonorsConcurrencyAndRPM(t *testing.T) {

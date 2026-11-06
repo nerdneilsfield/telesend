@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dengqi/telesend/internal/telegram"
+	"github.com/nerdneilsfield/telesend/internal/telegram"
 )
 
 // Job is one API request.

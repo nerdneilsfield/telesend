@@ -1,4 +1,4 @@
-module github.com/dengqi/telesend
+module github.com/nerdneilsfield/telesend
 
 go 1.27.1
 

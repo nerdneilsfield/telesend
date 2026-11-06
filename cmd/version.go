@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dengqi/telesend/internal/buildinfo"
+	"github.com/nerdneilsfield/telesend/internal/buildinfo"
 )
 
 func newVersionCmd() *cobra.Command {

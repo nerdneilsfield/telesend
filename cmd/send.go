@@ -13,11 +13,11 @@ import (
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 
-	"github.com/dengqi/telesend/internal/config"
-	"github.com/dengqi/telesend/internal/dispatch"
-	"github.com/dengqi/telesend/internal/logging"
-	"github.com/dengqi/telesend/internal/mdv2"
-	"github.com/dengqi/telesend/internal/telegram"
+	"github.com/nerdneilsfield/telesend/internal/config"
+	"github.com/nerdneilsfield/telesend/internal/dispatch"
+	"github.com/nerdneilsfield/telesend/internal/logging"
+	"github.com/nerdneilsfield/telesend/internal/mdv2"
+	"github.com/nerdneilsfield/telesend/internal/telegram"
 )
 
 const backoffBase = time.Second

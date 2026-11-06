@@ -10,7 +10,7 @@ import (
 	"github.com/schollz/progressbar/v3"
 	"golang.org/x/term"
 
-	"github.com/dengqi/telesend/internal/dispatch"
+	"github.com/nerdneilsfield/telesend/internal/dispatch"
 )
 
 // progress draws one bar for the whole run on stderr. It counts uploaded bytes
