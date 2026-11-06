@@ -42,7 +42,6 @@ dockers_v2:
     ids:
       - telesend
     images:
-      - nerdneils/telesend
       - ghcr.io/nerdneilsfield/telesend
     tags:
       - "{{ .Tag }}"
