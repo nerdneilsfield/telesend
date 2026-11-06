@@ -200,3 +200,16 @@ func TestNestedCodeBlockErrorIsNotSwallowed(t *testing.T) {
 		t.Errorf("want an error, got %q", got)
 	}
 }
+
+func TestSplitDropsBlankPieces(t *testing.T) {
+	got := Split("a\n\nb", 1)
+	if strings.Join(got, "|") != "a|b" {
+		t.Errorf("got %q, want [a b] with no empty message", got)
+	}
+	if got := Split("x\n\n\n", 100); len(got) != 1 {
+		t.Errorf("got %q", got)
+	}
+	if got := Split("  \n ", 100); len(got) != 0 {
+		t.Errorf("a blank text has nothing to send: %q", got)
+	}
+}

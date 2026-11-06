@@ -25,8 +25,14 @@ func Split(s string, limit int) []string {
 }
 
 // packRaw is pack for plain text: it keeps spaces and counts runes.
+// It drops pieces that hold only whitespace, because Telegram rejects an empty message.
 func packRaw(pieces []piece, limit int) []string {
 	var out []string
+	add := func(s string) {
+		if strings.TrimSpace(s) != "" {
+			out = append(out, s)
+		}
+	}
 	cur, started := "", false
 	for _, p := range pieces {
 		switch {
@@ -35,12 +41,12 @@ func packRaw(pieces []piece, limit int) []string {
 		case utf8.RuneCountInString(cur+p.sep+p.text) <= limit:
 			cur += p.sep + p.text
 		default:
-			out = append(out, cur)
+			add(cur)
 			cur = p.text
 		}
 	}
 	if started {
-		out = append(out, cur)
+		add(cur)
 	}
 	return out
 }
