@@ -67,11 +67,17 @@ func TestBrokenInputGivesErrorAndNoTempFile(t *testing.T) {
 	if _, err := exec.LookPath("ffmpeg"); err != nil {
 		t.Skip("ffmpeg is not installed")
 	}
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp) // MkdirTemp creates the conversion directory here.
 	bad := filepath.Join(t.TempDir(), "bad.wav")
 	if err := os.WriteFile(bad, []byte("not audio"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := PrepareVoice(context.Background(), bad); err == nil {
 		t.Error("a file that is not audio must fail")
+	}
+	left, _ := filepath.Glob(filepath.Join(tmp, "telesend-voice-*"))
+	if len(left) != 0 {
+		t.Errorf("a failed conversion left %v behind", left)
 	}
 }
