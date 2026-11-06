@@ -4,9 +4,11 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 
 	"github.com/dengqi/telesend/internal/config"
 	"github.com/dengqi/telesend/internal/logging"
@@ -23,18 +25,25 @@ Settings come from flags first, then from environment variables:
   --base-url  TELESEND_BASE_URL    API address (default https://api.telegram.org)
 
 Requests are spaced evenly (--rpm) and run through a worker pool (--concurrency).
-A 429 reply pauses all workers for the time Telegram asks.`
+An album of n items counts as n requests. A 429 reply pauses all workers for
+the time Telegram asks.
+
+Logs go to stderr. --log-level sets the level (default warn). -v and --verbose
+set it to debug. The bot token never appears in logs or errors.`
 
 const rootExample = `  export TELESEND_BOT_TOKEN=123456:ABC... TELESEND_CHAT_ID=987654321
   telesend text "Build finished"
   telesend text --markdown "**Deploy** done: [log](https://example.com/log)"
+  telesend text --file notes.md --markdown
   telesend photo a.jpg b.jpg --caption "Trip"
+  telesend media shot.png demo.mp4
   telesend file report.pdf
   telesend voice note.wav`
 
 // NewRootCmd builds the command tree.
 func NewRootCmd() *cobra.Command {
 	var verbose bool
+	var logLevel string
 
 	root := &cobra.Command{
 		Use:           "telesend",
@@ -43,9 +52,18 @@ func NewRootCmd() *cobra.Command {
 		Example:       rootExample,
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		PersistentPreRun: func(cmd *cobra.Command, _ []string) {
-			ctx := context.WithValue(cmd.Context(), loggerKey{}, logging.New(verbose))
-			cmd.SetContext(ctx)
+		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
+			level, err := logging.ParseLevel(logLevel)
+			if err != nil {
+				return usageErr(cmd, err)
+			}
+			if verbose {
+				level = zapcore.DebugLevel
+			}
+			token := config.Token(cmd.Flags(), os.Getenv)
+			log := logging.New(level, logging.Secrets(token)...)
+			cmd.SetContext(context.WithValue(cmd.Context(), loggerKey{}, log))
+			return nil
 		},
 		PersistentPostRun: func(cmd *cobra.Command, _ []string) {
 			_ = loggerFrom(cmd).Sync()
@@ -53,7 +71,8 @@ func NewRootCmd() *cobra.Command {
 	}
 
 	pf := root.PersistentFlags()
-	pf.BoolVarP(&verbose, "verbose", "v", false, "enable debug logging")
+	pf.BoolVarP(&verbose, "verbose", "v", false, "log at debug level (same as --log-level debug)")
+	pf.StringVar(&logLevel, "log-level", "warn", "log level on stderr: debug, info, warn or error")
 	pf.Bool("json", false, "print results as JSON")
 	config.AddFlags(pf)
 
@@ -61,7 +80,7 @@ func NewRootCmd() *cobra.Command {
 		return usageErr(cmd, err)
 	})
 
-	root.AddCommand(newTextCmd(), newPhotoCmd(), newFileCmd(), newVoiceCmd(), newVersionCmd())
+	root.AddCommand(newTextCmd(), newPhotoCmd(), newVideoCmd(), newMediaCmd(), newFileCmd(), newVoiceCmd(), newVersionCmd())
 	return root
 }
 

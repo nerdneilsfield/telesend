@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -195,5 +196,156 @@ func TestTokenNeverAppearsInErrors(t *testing.T) {
 	_, err := run(t, env, "text", "hi", "--retries", "0", "--rpm", "600")
 	if err == nil || strings.Contains(err.Error(), "SECRET") {
 		t.Errorf("error must exist and hide the token: %v", err)
+	}
+}
+
+func touch(t *testing.T, dir string, names ...string) []string {
+	t.Helper()
+	var paths []string
+	for _, n := range names {
+		p := filepath.Join(dir, n)
+		if err := os.WriteFile(p, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		paths = append(paths, p)
+	}
+	return paths
+}
+
+func okEnv(m *mock) map[string]string {
+	return map[string]string{"TELESEND_BOT_TOKEN": "tok", "TELESEND_CHAT_ID": "1", "TELESEND_BASE_URL": m.URL}
+}
+
+func mediaTypes(t *testing.T, c call) (types []string, captions []string) {
+	t.Helper()
+	var items []map[string]any
+	if err := json.Unmarshal([]byte(c.form["media"]), &items); err != nil {
+		t.Fatal(err)
+	}
+	for _, it := range items {
+		types = append(types, it["type"].(string))
+		c, _ := it["caption"].(string)
+		captions = append(captions, c)
+	}
+	return types, captions
+}
+
+func TestVideoAndMixedAlbum(t *testing.T) {
+	m := newMock(t)
+	files := touch(t, t.TempDir(), "a.jpg", "b.MP4", "c.png", "d.txt")
+
+	if _, err := run(t, okEnv(m), "video", files[1], "--rpm", "1800"); err != nil {
+		t.Fatal(err)
+	}
+	if c := m.calls[0]; c.method != "sendVideo" || c.form["supports_streaming"] != "true" || c.files["video"] != "b.MP4" {
+		t.Errorf("sendVideo call: %+v", c)
+	}
+
+	if _, err := run(t, okEnv(m), "media", files[0], files[1], files[2], "-c", "Mixed", "--rpm", "1800"); err != nil {
+		t.Fatal(err)
+	}
+	types, caps := mediaTypes(t, m.calls[1])
+	if strings.Join(types, ",") != "photo,video,photo" || caps[0] != "Mixed" || caps[1] != "" {
+		t.Errorf("types=%v captions=%v", types, caps)
+	}
+
+	_, err := run(t, okEnv(m), "media", files[3], "--rpm", "1800")
+	if err == nil || !strings.Contains(err.Error(), "photo or a video") {
+		t.Errorf("unknown extension must fail with advice: %v", err)
+	}
+	if len(m.calls) != 2 {
+		t.Errorf("a rejected input must send nothing, got %d calls", len(m.calls))
+	}
+}
+
+func TestManyFilesAreGroupedByTen(t *testing.T) {
+	cases := []struct {
+		n    int
+		want []string // method per call
+	}{
+		{25, []string{"sendMediaGroup", "sendMediaGroup", "sendMediaGroup"}},
+		{21, []string{"sendMediaGroup", "sendMediaGroup", "sendPhoto"}},
+	}
+	for _, tc := range cases {
+		m := newMock(t)
+		names := make([]string, tc.n)
+		for i := range names {
+			names[i] = fmt.Sprintf("p%02d.jpg", i)
+		}
+		args := append([]string{"photo"}, touch(t, t.TempDir(), names...)...)
+		args = append(args, "-c", "Set", "--rpm", "1800")
+		if _, err := run(t, okEnv(m), args...); err != nil {
+			t.Fatal(err)
+		}
+		var got []string
+		for _, c := range m.calls {
+			got = append(got, c.method)
+		}
+		if strings.Join(got, ",") != strings.Join(tc.want, ",") {
+			t.Errorf("n=%d: calls %v, want %v", tc.n, got, tc.want)
+		}
+		if _, caps := mediaTypes(t, m.calls[1]); caps[0] != "" {
+			t.Errorf("n=%d: only the first album carries the caption", tc.n)
+		}
+		if len(m.calls[0].files) != 10 {
+			t.Errorf("n=%d: first album uploads %d files, want 10", tc.n, len(m.calls[0].files))
+		}
+	}
+}
+
+func TestSeveralFilesGoOutAsDocumentAlbum(t *testing.T) {
+	m := newMock(t)
+	files := touch(t, t.TempDir(), "a.pdf", "b.zip", "c.txt")
+	if _, err := run(t, okEnv(m), append(append([]string{"file"}, files...), "--rpm", "1800")...); err != nil {
+		t.Fatal(err)
+	}
+	types, _ := mediaTypes(t, m.calls[0])
+	if strings.Join(types, ",") != "document,document,document" {
+		t.Errorf("types: %v", types)
+	}
+}
+
+func TestTextFromFileIsSplitInOrder(t *testing.T) {
+	m := newMock(t)
+	var lines []string
+	for i := range 1500 {
+		lines = append(lines, fmt.Sprintf("line %04d", i))
+	}
+	body := strings.Join(lines, "\n")
+	path := touch(t, t.TempDir(), "msg.txt")[0]
+	if err := os.WriteFile(path, []byte(body+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, okEnv(m), "text", "--file", path, "--rpm", "1800"); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.calls) < 3 {
+		t.Fatalf("expected a split into several messages, got %d", len(m.calls))
+	}
+	var parts []string
+	for _, c := range m.calls {
+		if n := len([]rune(c.form["text"])); n > 4096 {
+			t.Errorf("message of %d characters exceeds 4096", n)
+		}
+		parts = append(parts, c.form["text"])
+	}
+	if strings.Join(parts, "\n") != body {
+		t.Error("the messages joined do not equal the file content")
+	}
+	if _, err := run(t, okEnv(m), "text", "x", "--file", path); err == nil || !strings.Contains(err.Error(), "not both") {
+		t.Errorf("args plus --file must fail: %v", err)
+	}
+}
+
+func TestLogFlags(t *testing.T) {
+	m := newMock(t)
+	for _, args := range [][]string{{"-v"}, {"--verbose"}, {"--log-level", "info"}} {
+		if _, err := run(t, okEnv(m), append([]string{"text", "hi", "--rpm", "1800"}, args...)...); err != nil {
+			t.Errorf("%v: %v", args, err)
+		}
+	}
+	_, err := run(t, okEnv(m), "text", "hi", "--log-level", "loud")
+	if err == nil || !strings.Contains(err.Error(), "invalid log level") {
+		t.Errorf("bad level: %v", err)
 	}
 }

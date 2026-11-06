@@ -8,7 +8,10 @@ A command-line tool that sends text, Markdown, files, photos, albums, and voice 
 - Pauses all workers when Telegram answers `429`, for the time that Telegram asks.
 - Retries `5xx` replies and network errors with exponential backoff.
 - Converts CommonMark to Telegram MarkdownV2 and escapes every reserved character.
-- Packs photos into albums of up to 10. Converts audio to OGG/Opus with `ffmpeg`.
+- Sends photos, videos, and documents. Packs any number of files into albums of up to 10, and mixes photos with videos.
+- Splits a long text at line ends into messages of at most 4096 characters, and sends them in order.
+- Converts audio to OGG/Opus with `ffmpeg`.
+- Logs at four levels on stderr. The bot token never appears in logs or errors.
 - Works with a custom API address, for example a self-hosted `telegram-bot-api` server.
 
 ```
@@ -52,17 +55,40 @@ Each command sends one kind of content.
 
 | Command | What it sends |
 | --- | --- |
-| `telesend text [TEXT...]` | A text message. Reads stdin when you give no text. |
+| `telesend text [TEXT...]` | A text message. Reads `--file` or stdin when you give no text. |
 | `telesend photo SRC...` | One photo, or albums of up to 10 photos. |
-| `telesend file SRC...` | Files as documents, without recompression. |
+| `telesend video SRC...` | One video, or albums of up to 10 videos. |
+| `telesend media SRC...` | Photos and videos in the same albums. |
+| `telesend file SRC...` | Files as documents, without recompression. Several files go out as document albums. |
 | `telesend voice SRC` | An audio file as a playable voice message. |
 
 `SRC` is a local path or an `http(s)` URL.
 
+`telesend text --file notes.md` reads the file and sends its content as message text. It does not attach the file. To attach a file, use `telesend file`.
+
+### Albums
+
+`photo`, `video`, `media`, and `file` pack many files into albums of up to 10 items, in the order that you give.
+For example, 25 photos make three albums: 10, 10, and 5 photos. A single leftover item goes out as a normal message.
+The caption appears on the first item of the first album.
+
+`media` tells photos from videos by the file extension.
+
+| Kind | Extensions |
+| --- | --- |
+| Photo | `.jpg` `.jpeg` `.png` `.webp` `.bmp` |
+| Video | `.mp4` `.mov` `.mkv` `.webm` `.avi` `.m4v` |
+
+Telegram accepts documents in an album only with other documents. `file` therefore never mixes with photos or videos.
+
 ```
 telesend text --markdown "# Report\n\n- **ok**: 12\n- failed: 0"
+telesend text --file notes.md --markdown
 git log -5 --oneline | telesend text
 telesend photo a.jpg b.jpg c.jpg --caption "Trip"
+telesend video demo.mp4
+telesend media shot1.png shot2.png demo.mp4 --caption "Release 2"
+telesend photo ./shots/*.png
 telesend file report.pdf --caption "Q3 report"
 telesend voice meeting.wav
 ```
@@ -92,7 +118,7 @@ Tables, task lists, and images have no MarkdownV2 form. Images become links. A t
 | --- | --- | --- |
 | Text length | 4096 characters | Splits at line ends, or between Markdown blocks. |
 | Caption length | 1024 characters | Stops with an error. |
-| Album size | 10 photos | Starts a new album. |
+| Album size | 10 items | Starts a new album. |
 
 A line longer than 4096 characters in Markdown mode stops with an error. Break the line up.
 
@@ -109,7 +135,9 @@ A flag overrides the environment variable. The environment variable overrides th
 | `--concurrency` | none | `1` | Requests in flight, 1 to 16. |
 | `--retries` | none | `3` | Retries after `429`, `5xx`, or a network error. |
 | `--timeout` | none | `2m` | Time limit for one attempt. |
-| `--verbose`, `-v` | none | off | Debug logging on stderr. |
+| `--log-level` | none | `warn` | Log level on stderr: `debug`, `info`, `warn`, or `error`. |
+| `--verbose`, `-v` | none | off | Same as `--log-level debug`. |
+| `--json` | none | off | Print results as JSON on stdout. |
 
 ### Rate limits
 
@@ -118,12 +146,27 @@ The default of 20 requests per minute stays under the group limit.
 For a private chat, raise `--rpm` to 60.
 
 `--rpm` sets the spacing between requests: 60 ÷ `rpm` seconds. The limiter sends the first request at once.
+An album of n items uses n of the `--rpm` budget, because Telegram counts each item as a message.
+At the default of 20, an album of 10 items takes about 27 seconds to start.
 
 With `--concurrency` above 1, messages can arrive out of order. Keep the default of 1 when order matters.
 
 After the first failed job, telesend starts no more jobs. It reports the failure and the number of unsent jobs, and it exits with code 1.
 
 A retry after a timeout can send a duplicate when Telegram received the first request.
+
+### Logs
+
+Logs go to stderr. Results go to stdout.
+
+| Level | What it shows |
+| --- | --- |
+| `error` | Each failed job, with its attempt count and error. |
+| `warn` (default) | Retries and unsent jobs. |
+| `info` | The job count, and each job that was sent. |
+| `debug` | The resolved settings, every attempt, and every HTTP status with its duration. |
+
+`telesend` replaces the bot token with `<token>` in every log line and error message.
 
 ### Voice formats
 

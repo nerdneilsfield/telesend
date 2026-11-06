@@ -1,4 +1,4 @@
-// Package telegram is a thin Bot API client. It covers the five send methods
+// Package telegram is a thin Bot API client. It covers the send methods
 // that telesend needs and reports errors in a form the retry loop can classify.
 package telegram
 
@@ -15,6 +15,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"go.uber.org/zap"
 )
 
 // Client calls the Bot API.
@@ -22,6 +24,8 @@ type Client struct {
 	BaseURL string
 	Token   string
 	HTTP    *http.Client
+	// Log receives one debug line per request. It may be nil.
+	Log *zap.Logger
 }
 
 // APIError is an error reply from the Bot API or from a proxy in front of it.
@@ -41,10 +45,43 @@ func (e *APIError) Retryable() bool {
 	return e.Code == http.StatusTooManyRequests || e.Code >= 500
 }
 
+// Kind is the Bot API media type of an album item.
+type Kind string
+
+// Media kinds that can go in an album. Telegram groups documents only with documents.
+const (
+	KindPhoto    Kind = "photo"
+	KindVideo    Kind = "video"
+	KindDocument Kind = "document"
+)
+
 // Media names one file to send. Set exactly one of Path and URL.
+// Kind matters for albums and for SendMedia.
 type Media struct {
 	Path string
 	URL  string
+	Kind Kind
+}
+
+var kindByExt = map[string]Kind{
+	".jpg": KindPhoto, ".jpeg": KindPhoto, ".png": KindPhoto, ".webp": KindPhoto, ".bmp": KindPhoto,
+	".mp4": KindVideo, ".mov": KindVideo, ".mkv": KindVideo, ".webm": KindVideo, ".avi": KindVideo, ".m4v": KindVideo,
+}
+
+// DetectKind returns the media kind from the file extension of a path or URL.
+func DetectKind(m Media) (Kind, error) {
+	name := m.Path
+	if m.URL != "" {
+		u, err := url.Parse(m.URL)
+		if err != nil {
+			return "", err
+		}
+		name = u.Path
+	}
+	if k, ok := kindByExt[strings.ToLower(filepath.Ext(name))]; ok {
+		return k, nil
+	}
+	return "", fmt.Errorf("cannot tell if %q is a photo or a video; use 'telesend photo' or 'telesend video'", name)
 }
 
 // ParseMedia treats an http(s) address as a remote file and anything else as a local path.
@@ -84,10 +121,16 @@ func (c *Client) call(ctx context.Context, method string, fields map[string]stri
 	// A known length avoids chunked encoding, which not every Bot API server accepts.
 	req.ContentLength = size
 
+	began := time.Now()
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
 		_ = pr.Close()
 		return nil, c.redact(err)
+	}
+	if c.Log != nil {
+		c.Log.Debug("telegram response", zap.String("method", method),
+			zap.Int("status", resp.StatusCode), zap.Int64("request_bytes", size),
+			zap.Duration("took", time.Since(began)))
 	}
 	defer func() { _ = resp.Body.Close() }()
 

@@ -56,23 +56,31 @@ func AddFlags(fs *pflag.FlagSet) {
 	fs.Duration("timeout", DefaultTimeout, "time limit for one request attempt")
 }
 
-// Resolve builds a Config from fs and the environment lookup getenv.
-func Resolve(fs *pflag.FlagSet, getenv func(string) string) (Config, error) {
-	str := func(flag, env string) string {
-		if fs.Changed(flag) {
-			v, _ := fs.GetString(flag)
-			return v
-		}
-		if v := getenv(env); v != "" {
-			return v
-		}
+// pick returns the flag value if typed, else the environment value, else the flag default.
+func pick(fs *pflag.FlagSet, getenv func(string) string, flag, env string) string {
+	if fs.Changed(flag) {
 		v, _ := fs.GetString(flag)
 		return v
 	}
+	if v := getenv(env); v != "" {
+		return v
+	}
+	v, _ := fs.GetString(flag)
+	return v
+}
+
+// Token returns the bot token without validating the other settings.
+// The logger uses it to mask the token before the full settings exist.
+func Token(fs *pflag.FlagSet, getenv func(string) string) string {
+	return strings.TrimSpace(pick(fs, getenv, "token", EnvToken))
+}
+
+// Resolve builds a Config from fs and the environment lookup getenv.
+func Resolve(fs *pflag.FlagSet, getenv func(string) string) (Config, error) {
 	c := Config{
-		Token:   strings.TrimSpace(str("token", EnvToken)),
-		BaseURL: strings.TrimRight(strings.TrimSpace(str("base-url", EnvBaseURL)), "/"),
-		ChatID:  strings.TrimSpace(str("to", EnvChatID)),
+		Token:   Token(fs, getenv),
+		BaseURL: strings.TrimRight(strings.TrimSpace(pick(fs, getenv, "base-url", EnvBaseURL)), "/"),
+		ChatID:  strings.TrimSpace(pick(fs, getenv, "to", EnvChatID)),
 	}
 	c.Concurrency, _ = fs.GetInt("concurrency")
 	c.RPM, _ = fs.GetInt("rpm")

@@ -15,6 +15,9 @@ import (
 // Job is one API request.
 type Job struct {
 	Name string
+	// Weight is the number of rpm slots the job uses. An album of n items uses n.
+	// Zero means 1.
+	Weight int
 	// Run makes one attempt. It must open its inputs again on every call.
 	Run func(ctx context.Context) ([]int, error)
 }
@@ -38,6 +41,8 @@ type Options struct {
 	Timeout time.Duration
 	// BackoffBase is the first wait after a network error or 5xx reply. It doubles per retry.
 	BackoffBase time.Duration
+	// OnAttempt is called after each attempt with its duration and error. It may be nil.
+	OnAttempt func(job string, attempt int, took time.Duration, err error)
 	// OnRetry is called before each wait. It may be nil.
 	OnRetry func(job string, attempt int, wait time.Duration, err error)
 }
@@ -60,7 +65,10 @@ func Run(ctx context.Context, jobs []Job, o Options) []Result {
 		wg.Go(func() {
 			for i := range queue {
 				results[i] = runJob(ctx, jobs[i], lim, o)
-				if results[i].Err != nil {
+				if results[i].Attempts == 0 && errors.Is(results[i].Err, context.Canceled) {
+					// The run stopped before this job made a request.
+					results[i] = Result{Name: jobs[i].Name, Skipped: true}
+				} else if results[i].Err != nil {
 					cancel()
 				}
 			}
@@ -82,14 +90,20 @@ feed:
 func runJob(ctx context.Context, j Job, lim *Limiter, o Options) Result {
 	res := Result{Name: j.Name}
 	for attempt := 0; ; attempt++ {
-		if err := lim.Wait(ctx); err != nil {
-			res.Err = err
-			return res
+		for range max(j.Weight, 1) {
+			if err := lim.Wait(ctx); err != nil {
+				res.Err = err
+				return res
+			}
 		}
 		res.Attempts++
 		actx, cancel := context.WithTimeout(ctx, o.Timeout)
+		began := time.Now()
 		ids, err := j.Run(actx)
 		cancel()
+		if o.OnAttempt != nil {
+			o.OnAttempt(j.Name, res.Attempts, time.Since(began), err)
+		}
 		if err == nil {
 			res.IDs, res.Err = ids, nil
 			return res

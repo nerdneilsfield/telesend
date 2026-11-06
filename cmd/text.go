@@ -16,22 +16,26 @@ import (
 
 func newTextCmd() *cobra.Command {
 	var markdown bool
+	var file string
 	c := &cobra.Command{
 		Use:   "text [TEXT...]",
 		Short: "Send a text message",
 		Long: `Send a text message.
 
-Pass the text as arguments, or pipe it on stdin. A text longer than 4096
-characters is split at line ends into several messages.
+Pass the text as arguments, read it from a file with --file, or pipe it on
+stdin. A text longer than 4096 characters is split at line ends into several
+messages, which arrive in order. The file is sent as message text, not as an
+attachment. To attach a file, use 'telesend file'.
 
 With --markdown, telesend converts CommonMark (headings, **bold**, *italic*,
 ~~strike~~, lists, quotes, links, code) to Telegram MarkdownV2 and escapes
 every reserved character.`,
 		Example: `  telesend text "Build finished"
+  telesend text --file notes.md --markdown
   telesend text --markdown "# Report\n\n- **ok**: 12\n- failed: 0"
   git log -5 --oneline | telesend text`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			body, err := readText(cmd, args)
+			body, err := readText(cmd, args, file)
 			if err != nil {
 				return usageErr(cmd, err)
 			}
@@ -60,21 +64,31 @@ every reserved character.`,
 		},
 	}
 	c.Flags().BoolVarP(&markdown, "markdown", "m", false, "treat the text as Markdown")
+	c.Flags().StringVarP(&file, "file", "f", "", "read the message text from this file ('-' for stdin)")
 	return c
 }
 
-// readText takes the text from args, or from stdin when no args are given.
-func readText(cmd *cobra.Command, args []string) (string, error) {
-	if len(args) > 0 && (len(args) != 1 || args[0] != "-") {
+// readText takes the text from --file, from args, or from stdin when neither is given.
+func readText(cmd *cobra.Command, args []string, file string) (string, error) {
+	if file != "" && len(args) > 0 {
+		return "", fmt.Errorf("give the text as arguments or with --file, not both")
+	}
+	var b []byte
+	var err error
+	switch {
+	case file != "" && file != "-":
+		b, err = os.ReadFile(file)
+	case len(args) > 0 && (len(args) != 1 || args[0] != "-"):
 		return strings.Join(args, " "), nil
-	}
-	in := cmd.InOrStdin()
-	if f, ok := in.(*os.File); ok && len(args) == 0 {
-		if info, err := f.Stat(); err == nil && info.Mode()&os.ModeCharDevice != 0 {
-			return "", fmt.Errorf("text needs a message argument or piped stdin")
+	default:
+		in := cmd.InOrStdin()
+		if f, ok := in.(*os.File); ok && len(args) == 0 && file == "" {
+			if info, statErr := f.Stat(); statErr == nil && info.Mode()&os.ModeCharDevice != 0 {
+				return "", fmt.Errorf("text needs a message argument, --file, or piped stdin")
+			}
 		}
+		b, err = io.ReadAll(in)
 	}
-	b, err := io.ReadAll(in)
 	if err != nil {
 		return "", err
 	}

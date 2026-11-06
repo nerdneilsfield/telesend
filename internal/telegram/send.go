@@ -3,7 +3,9 @@ package telegram
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"maps"
 	"strconv"
 )
 
@@ -47,34 +49,60 @@ func (c *Client) SendMessage(ctx context.Context, chatID, text string, markdown 
 
 // SendDocument sends a file as a document.
 func (c *Client) SendDocument(ctx context.Context, m Media, o Options) ([]int, error) {
-	return c.sendMedia(ctx, "sendDocument", "document", m, o)
+	return c.sendMedia(ctx, "sendDocument", "document", m, o, nil)
 }
 
 // SendPhoto sends one photo.
 func (c *Client) SendPhoto(ctx context.Context, m Media, o Options) ([]int, error) {
-	return c.sendMedia(ctx, "sendPhoto", "photo", m, o)
+	return c.sendMedia(ctx, "sendPhoto", "photo", m, o, nil)
+}
+
+// SendVideo sends one video that plays while it downloads.
+func (c *Client) SendVideo(ctx context.Context, m Media, o Options) ([]int, error) {
+	return c.sendMedia(ctx, "sendVideo", "video", m, o, map[string]string{"supports_streaming": "true"})
+}
+
+// SendMedia sends one photo, video or document, chosen by m.Kind.
+func (c *Client) SendMedia(ctx context.Context, m Media, o Options) ([]int, error) {
+	switch m.Kind {
+	case KindVideo:
+		return c.SendVideo(ctx, m, o)
+	case KindDocument:
+		return c.SendDocument(ctx, m, o)
+	default:
+		return c.SendPhoto(ctx, m, o)
+	}
 }
 
 // SendVoice sends a voice message. Local files must be OGG/Opus, MP3 or M4A.
 func (c *Client) SendVoice(ctx context.Context, m Media, o Options) ([]int, error) {
-	return c.sendMedia(ctx, "sendVoice", "voice", m, o)
+	return c.sendMedia(ctx, "sendVoice", "voice", m, o, nil)
 }
 
-// SendMediaGroup sends 2 to 10 photos as one album. The caption sits on the first photo.
-func (c *Client) SendMediaGroup(ctx context.Context, photos []Media, o Options) ([]int, error) {
-	if n := len(photos); n < minGroupMedia || n > MaxGroupMedia {
-		return nil, fmt.Errorf("media group needs %d to %d photos, got %d", minGroupMedia, MaxGroupMedia, n)
+// SendMediaGroup sends 2 to 10 items as one album. Each Media needs a Kind.
+// Photos and videos can mix. Documents must not mix with other kinds.
+// The caption sits on the first item.
+func (c *Client) SendMediaGroup(ctx context.Context, media []Media, o Options) ([]int, error) {
+	if n := len(media); n < minGroupMedia || n > MaxGroupMedia {
+		return nil, fmt.Errorf("media group needs %d to %d items, got %d", minGroupMedia, MaxGroupMedia, n)
 	}
 	type item struct {
-		Type      string `json:"type"`
-		Media     string `json:"media"`
-		Caption   string `json:"caption,omitempty"`
-		ParseMode string `json:"parse_mode,omitempty"`
+		Type              string `json:"type"`
+		Media             string `json:"media"`
+		Caption           string `json:"caption,omitempty"`
+		ParseMode         string `json:"parse_mode,omitempty"`
+		SupportsStreaming bool   `json:"supports_streaming,omitempty"`
 	}
-	items := make([]item, len(photos))
+	items := make([]item, len(media))
 	var files []upload
-	for i, p := range photos {
-		items[i] = item{Type: "photo"}
+	for i, p := range media {
+		if p.Kind == "" {
+			return nil, fmt.Errorf("media group item %d has no kind", i+1)
+		}
+		if (p.Kind == KindDocument) != (media[0].Kind == KindDocument) {
+			return nil, errors.New("a media group cannot mix documents with photos or videos")
+		}
+		items[i] = item{Type: string(p.Kind), SupportsStreaming: p.Kind == KindVideo}
 		if p.URL != "" {
 			items[i].Media = p.URL
 		} else {
@@ -96,8 +124,9 @@ func (c *Client) SendMediaGroup(ctx context.Context, photos []Media, o Options) 
 	return c.sendOne(ctx, "sendMediaGroup", map[string]string{"chat_id": o.ChatID, "media": string(raw)}, files)
 }
 
-func (c *Client) sendMedia(ctx context.Context, method, field string, m Media, o Options) ([]int, error) {
+func (c *Client) sendMedia(ctx context.Context, method, field string, m Media, o Options, extra map[string]string) ([]int, error) {
 	f := o.fields()
+	maps.Copy(f, extra)
 	var files []upload
 	if m.URL != "" {
 		f[field] = m.URL

@@ -38,9 +38,13 @@ func runSend(cmd *cobra.Command, build builder) error {
 	}
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.MaxIdleConnsPerHost = cfg.Concurrency
+	log := loggerFrom(cmd)
 	s := session{cfg: cfg, client: &telegram.Client{
-		BaseURL: cfg.BaseURL, Token: cfg.Token, HTTP: &http.Client{Transport: transport},
+		BaseURL: cfg.BaseURL, Token: cfg.Token, HTTP: &http.Client{Transport: transport}, Log: log,
 	}}
+	log.Debug("settings", zap.String("base_url", cfg.BaseURL), zap.String("chat", cfg.ChatID),
+		zap.Int("rpm", cfg.RPM), zap.Int("concurrency", cfg.Concurrency),
+		zap.Int("retries", cfg.Retries), zap.Duration("timeout", cfg.Timeout))
 
 	jobs, cleanup, err := build(cmd.Context(), s)
 	if cleanup != nil {
@@ -50,24 +54,39 @@ func runSend(cmd *cobra.Command, build builder) error {
 		return err
 	}
 
-	log := loggerFrom(cmd)
+	log.Info("sending", zap.Int("jobs", len(jobs)))
 	results := dispatch.Run(cmd.Context(), jobs, dispatch.Options{
 		Concurrency: cfg.Concurrency,
 		RPM:         cfg.RPM,
 		Retries:     cfg.Retries,
 		Timeout:     cfg.Timeout,
 		BackoffBase: backoffBase,
+		OnAttempt: func(job string, attempt int, took time.Duration, err error) {
+			log.Debug("attempt", zap.String("job", job), zap.Int("attempt", attempt),
+				zap.Duration("took", took), zap.Bool("ok", err == nil))
+		},
 		OnRetry: func(job string, attempt int, wait time.Duration, err error) {
 			log.Warn("retrying", zap.String("job", job), zap.Int("retry", attempt),
 				zap.Duration("wait", wait), zap.Error(err))
 		},
 	})
 
+	for _, r := range results {
+		switch {
+		case r.Skipped:
+			log.Warn("not sent", zap.String("job", r.Name))
+		case r.Err != nil:
+			log.Error("failed", zap.String("job", r.Name), zap.Int("attempts", r.Attempts), zap.Error(r.Err))
+		default:
+			log.Info("sent", zap.String("job", r.Name), zap.Ints("message_ids", r.IDs), zap.Int("attempts", r.Attempts))
+		}
+	}
+
 	asJSON, _ := cmd.Flags().GetBool("json")
 	if err := report(cmd, results, asJSON); err != nil {
 		return err
 	}
-	return failure(results)
+	return failure(results, cmd.Context().Err() != nil)
 }
 
 type jsonResult struct {
@@ -104,24 +123,25 @@ func report(cmd *cobra.Command, results []dispatch.Result, asJSON bool) error {
 }
 
 // failure summarizes failed and skipped jobs. It returns nil when all jobs were sent.
-func failure(results []dispatch.Result) error {
+// interrupted is true when the user stopped the run with a signal.
+func failure(results []dispatch.Result, interrupted bool) error {
 	var errs []error
-	skipped, canceled := 0, false
+	skipped := 0
 	for _, r := range results {
 		switch {
 		case r.Skipped:
 			skipped++
-		case errors.Is(r.Err, context.Canceled):
-			canceled = true
+		case interrupted && errors.Is(r.Err, context.Canceled):
+			// The signal, not the job, caused this error.
 		case r.Err != nil:
 			errs = append(errs, fmt.Errorf("%s: %w", r.Name, r.Err))
 		}
 	}
-	if len(errs) == 0 && !canceled && skipped == 0 {
-		return nil
+	if interrupted {
+		errs = append([]error{errors.New("interrupted")}, errs...)
 	}
-	if len(errs) == 0 && canceled {
-		errs = append(errs, errors.New("interrupted"))
+	if len(errs) == 0 && skipped == 0 {
+		return nil
 	}
 	if skipped > 0 {
 		errs = append(errs, fmt.Errorf("%d job(s) not sent", skipped))

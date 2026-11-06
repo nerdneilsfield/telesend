@@ -108,3 +108,13 @@ func TestServerErrorRetriesThenGivesUp(t *testing.T) {
 		t.Fatalf("calls=%d err=%v", calls.Load(), res[0].Err)
 	}
 }
+
+func TestWeightUsesRPMSlots(t *testing.T) {
+	// 1200 rpm gives one slot per 50 ms. A job of weight 4 waits for 3 more slots after the first.
+	job := Job{Name: "album", Weight: 4, Run: func(context.Context) ([]int, error) { return nil, nil }}
+	began := time.Now()
+	Run(context.Background(), []Job{job}, Options{Concurrency: 1, RPM: 1200, Timeout: time.Second, BackoffBase: time.Millisecond})
+	if d := time.Since(began); d < 140*time.Millisecond {
+		t.Errorf("weight 4 finished in %v; want >= ~150ms", d)
+	}
+}

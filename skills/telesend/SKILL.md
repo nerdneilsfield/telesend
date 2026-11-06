@@ -1,6 +1,6 @@
 ---
 name: telesend
-description: Send text, Markdown, files, photos, photo albums, or voice messages to a Telegram chat with the telesend CLI. Use when the user asks to send, share, notify, or upload something to Telegram.
+description: Send text, Markdown, long messages, files, photos, videos, mixed albums, or voice messages to a Telegram chat with the telesend CLI. Use when the user asks to send, share, notify, or upload something to Telegram.
 allowed-tools: Bash(telesend:*)
 ---
 
@@ -15,7 +15,7 @@ Use `telesend` to send content from a Telegram bot to a chat.
    If one is empty, ask the user to set it. Do not ask the user to type the token into the chat.
 3. Send to the default chat. Pass `--to <id>` only when the user names another recipient.
 
-Never print, log, or echo the bot token.
+Never print, log, or echo the bot token. For debugging, add `-v`. The log masks the token.
 
 ## Map the request to a command
 
@@ -23,23 +23,28 @@ Never print, log, or echo the bot token.
 | --- | --- |
 | A short message | `telesend text "<text>" --json` |
 | Formatted text (bold, lists, links, code) | `telesend text --markdown "<markdown>" --json` |
-| The content of a file or command output as text | `<command> \| telesend text --json` |
+| The content of a text or Markdown file, as a message | `telesend text --file <path> [--markdown] --json` |
+| Command output as text | `<command> \| telesend text --json` |
 | One photo | `telesend photo <path-or-url> --json` |
 | Several photos as an album | `telesend photo <p1> <p2> ... --json` |
-| A document, archive, log, or original-quality image | `telesend file <path-or-url>... --json` |
+| One video, or several videos | `telesend video <path-or-url>... --json` |
+| Photos and videos together | `telesend media <p1> <v1> ... --json` |
+| A document, archive, log, or original-quality image, attached | `telesend file <path-or-url>... --json` |
 | An audio recording as a voice message | `telesend voice <path-or-url> --json` |
 | Any media with a caption | Add `--caption "<text>"`. Add `--markdown` for a Markdown caption. |
 
 Rules:
 
 1. Always add `--json`.
-2. Send an image with `file` when the user wants the original quality or the image is larger than 10 MB.
-3. Quote every text argument. Use single quotes when the text contains `$` or backticks.
-4. Do not change `--rpm` or `--concurrency` unless the user asks.
+2. "Send this file as a message" means the file content is the message: use `text --file`. "Attach", "upload", or "send the file" means a document: use `file`.
+3. Pass every file in one command. `telesend` splits long text at 4096 characters and packs files into albums of 10. Do not split them yourself.
+4. Send an image with `file` when the user wants the original quality or the image is larger than 10 MB.
+5. Quote every text argument. Use single quotes when the text contains `$` or backticks.
+6. Do not change `--rpm` or `--concurrency` unless the user asks.
 
 ## Read the result
 
-`--json` prints a list. Each item has `name`, `ok`, `message_ids`, `attempts`, `error`, and `skipped`.
+`--json` prints a list with one item per message or album. Each item has `name`, `ok`, `message_ids`, `attempts`, `error`, and `skipped`.
 
 1. Exit code 0 means every item has `ok: true`. Report the count and the `message_ids`.
 2. Exit code 1 means a failure. Report the `error` of the failed item. Report how many items were skipped.
@@ -54,6 +59,7 @@ Rules:
 | `403 ... bot was blocked` | The user blocked the bot | Report it. |
 | `400 ... can't parse entities` | Invalid Markdown input | Send again without `--markdown`. |
 | `ffmpeg is not installed` | Voice file needs conversion | Ask the user to install `ffmpeg`, or send an `.ogg`, `.mp3`, or `.m4a` file. |
+| `cannot tell if ... photo or a video` | `media` got a file with an unknown extension | Use `telesend photo` or `telesend video`, or `telesend file`. |
 | `caption has N characters` | Caption over 1024 characters | Shorten the caption, or send the text with `telesend text`. |
 
 ## Examples
