@@ -4,7 +4,10 @@ go 1.27.1
 
 require (
 	github.com/spf13/cobra v1.10.2
+	github.com/spf13/pflag v1.0.9
+	github.com/yuin/goldmark v1.8.7
 	go.uber.org/zap v1.28.0
+	golang.org/x/time v0.16.0
 )
 
 require (
@@ -51,7 +54,6 @@ require (
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/schollz/progressbar/v3 v3.19.1 // indirect
 	github.com/spf13/afero v1.15.0 // indirect
-	github.com/spf13/pflag v1.0.9 // indirect
 	github.com/tidwall/jsonc v0.3.3 // indirect
 	github.com/urfave/cli/v3 v3.14.0 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
