@@ -33,6 +33,7 @@ type jsonResult struct {
 
 type jsonReport struct {
 	OK      bool         `json:"ok"`
+	Error   string       `json:"error,omitempty"`
 	Sent    int          `json:"sent"`
 	Failed  int          `json:"failed"`
 	Skipped int          `json:"skipped"`
@@ -99,19 +100,25 @@ func writeJSON(w io.Writer, results []dispatch.Result, s summary) error {
 	return enc.Encode(rep)
 }
 
-// writeHuman prints one line per sent job and a summary line.
-func writeHuman(w io.Writer, results []dispatch.Result, s summary) error {
-	var b strings.Builder
-	for _, r := range results {
-		if r.Err != nil || r.Skipped {
-			continue
-		}
-		fmt.Fprintf(&b, "sent %s  message %s  %s", r.Name, telegram.String(r.IDs), formatDuration(r.Took))
-		if r.Bytes > 0 && r.Took > 0 {
-			fmt.Fprintf(&b, "  %s at %s", formatBytes(float64(r.Bytes)), formatSpeed(float64(r.Bytes)/r.Took.Seconds()))
-		}
-		b.WriteByte('\n')
+// writeJSONError prints the report of a run that failed before it sent anything.
+func writeJSONError(w io.Writer, err error) error {
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(jsonReport{Error: err.Error(), Results: []jsonResult{}})
+}
+
+// humanLine describes one sent job.
+func humanLine(r dispatch.Result) string {
+	line := fmt.Sprintf("sent %s  message %s  %s", r.Name, telegram.String(r.IDs), formatDuration(r.Took))
+	if r.Bytes > 0 && r.Took > 0 {
+		line += fmt.Sprintf("  %s at %s", formatBytes(float64(r.Bytes)), formatSpeed(float64(r.Bytes)/r.Took.Seconds()))
 	}
+	return line
+}
+
+// writeSummary prints the closing line of a run.
+func writeSummary(w io.Writer, results []dispatch.Result, s summary) error {
+	var b strings.Builder
 	fmt.Fprintf(&b, "Sent %d of %d in %s.", s.sent, len(results), formatDuration(time.Duration(s.stats.ElapsedMS)*time.Millisecond))
 	if s.stats.Bytes > 0 && s.avgSpeed > 0 {
 		fmt.Fprintf(&b, " %s at %s on average.", formatBytes(float64(s.stats.Bytes)), formatSpeed(s.avgSpeed))

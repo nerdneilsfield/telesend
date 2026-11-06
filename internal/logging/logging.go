@@ -63,8 +63,11 @@ type maskCore struct {
 	secrets []string
 }
 
-func (m maskCore) mask(s string) string {
-	for _, secret := range m.secrets {
+func (m maskCore) mask(s string) string { return MaskString(s, m.secrets...) }
+
+// MaskString replaces every secret in s with Mask.
+func MaskString(s string, secrets ...string) string {
+	for _, secret := range secrets {
 		s = strings.ReplaceAll(s, secret, Mask)
 	}
 	return s

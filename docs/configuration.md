@@ -35,7 +35,9 @@ Telegram allows about 1 message per second to one chat, 20 messages per minute t
 
 The default of 20 requests per minute stays under the group limit. For a private chat, raise `--rpm` to 60.
 
-telesend spaces requests evenly: 60 ÷ `rpm` seconds apart. An album of n items counts as n messages, because Telegram counts each item as a message. The album goes out at once. The next request waits for n spacings. At the default, a request after an album of 10 items waits 30 seconds.
+telesend never sends more than `rpm` messages in any 60 seconds. An album of n items counts as n messages, because Telegram counts each item as a message.
+
+telesend also spaces requests evenly: 60 ÷ `rpm` seconds apart. An album goes out at once. The next request waits for one spacing for each item of the album. At the default, a request after an album of 10 items waits 30 seconds.
 
 When `--concurrency` is above 1, messages can arrive out of order. Keep the default when order matters.
 

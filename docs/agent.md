@@ -51,6 +51,7 @@ Add `--json` to get one JSON object on stdout. In this mode, telesend prints no 
 | Field | Meaning |
 | --- | --- |
 | `ok` | `true` when every job was sent. |
+| `error` | The reason, when the run failed before it sent anything. |
 | `results[].name` | The job, for example `photo a.jpg` or `album 1-10 of 25`. |
 | `results[].message_ids` | The IDs of the messages that Telegram created. |
 | `results[].attempts` | The number of requests, including retries. |
@@ -61,3 +62,7 @@ Add `--json` to get one JSON object on stdout. In this mode, telesend prints no 
 | `stats.avg_speed_bps` | Uploaded bytes per second of request time. |
 
 The exit code is 0 when `ok` is `true`. The exit code is 1 otherwise. The message `error: ...` goes to stderr.
+
+When telesend finds an error before it sends anything, such as a missing file or a wrong setting, it still prints one JSON object. `ok` is `false`, `results` is empty, and the top-level `error` field holds the message.
+
+A wrong command line, such as an unknown flag or a missing argument, prints only the usage message on stderr. If stdout is empty and the exit code is 1, read stderr.

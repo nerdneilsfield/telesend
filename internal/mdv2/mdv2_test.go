@@ -169,3 +169,34 @@ func TestListSplitsBetweenItems(t *testing.T) {
 		}
 	}
 }
+
+func TestCodeBlockKeepsItsWhitespace(t *testing.T) {
+	src := "```py\n    return 1\n\n  x = 2\n```"
+	got, err := Convert(src, 4096)
+	want := "```py\n    return 1\n\n  x = 2\n```"
+	if err != nil || len(got) != 1 || got[0] != want {
+		t.Errorf("got %q, want %q (err %v)", got, want, err)
+	}
+
+	// A split must not trim the spaces at the edges of a piece.
+	src = "```\n" + strings.Repeat("  line\n", 20) + "```"
+	got, err = Convert(src, 40)
+	if err != nil || len(got) < 2 {
+		t.Fatalf("want a split: %v %v", got, err)
+	}
+	for _, m := range got {
+		for _, l := range strings.Split(strings.TrimSuffix(strings.TrimPrefix(m, "```\n"), "\n```"), "\n") {
+			if l != "  line" {
+				t.Errorf("a line lost its indent: %q in %q", l, m)
+			}
+		}
+	}
+}
+
+func TestNestedCodeBlockErrorIsNotSwallowed(t *testing.T) {
+	// The fence needs 8 characters. A limit of 5 cannot hold it.
+	got, err := Convert("> ok\n>\n> ```\n> x\n> ```", 5)
+	if err == nil {
+		t.Errorf("want an error, got %q", got)
+	}
+}

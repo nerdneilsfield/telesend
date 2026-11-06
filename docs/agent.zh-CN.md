@@ -51,6 +51,7 @@ Agent 运行 `telesend file build.log --json`，并报告消息 ID。
 | 字段 | 含义 |
 | --- | --- |
 | `ok` | 所有任务都已发送时为 `true`。 |
+| `error` | 运行在发送任何内容之前失败时的原因。 |
 | `results[].name` | 任务，例如 `photo a.jpg` 或 `album 1-10 of 25`。 |
 | `results[].message_ids` | Telegram 创建的消息 ID。 |
 | `results[].attempts` | 请求次数，包含重试。 |
@@ -61,3 +62,7 @@ Agent 运行 `telesend file build.log --json`，并报告消息 ID。
 | `stats.avg_speed_bps` | 每秒请求时间内上传的字节数。 |
 
 `ok` 为 `true` 时退出码为 0，否则为 1。`error: ...` 信息输出到 stderr。
+
+在发送任何内容之前发现错误时，例如文件不存在或设置错误，telesend 仍然输出一个 JSON 对象。`ok` 为 `false`，`results` 为空，顶层 `error` 字段包含错误信息。
+
+命令行错误，例如未知参数或缺少参数，只在 stderr 输出用法信息。如果 stdout 为空且退出码为 1，请读取 stderr。

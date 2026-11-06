@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -14,6 +15,7 @@ import (
 
 	"github.com/dengqi/telesend/internal/config"
 	"github.com/dengqi/telesend/internal/dispatch"
+	"github.com/dengqi/telesend/internal/logging"
 	"github.com/dengqi/telesend/internal/mdv2"
 	"github.com/dengqi/telesend/internal/telegram"
 )
@@ -30,10 +32,25 @@ type session struct {
 type builder func(ctx context.Context, s session) (jobs []dispatch.Job, cleanup func(), err error)
 
 // runSend resolves settings, builds the jobs, runs them and prints the results.
+//
+// With --json, the command prints one JSON object on stdout in every case that
+// reaches this function, including a failure before the first request.
 func runSend(cmd *cobra.Command, build builder) error {
+	asJSON, _ := cmd.Flags().GetBool("json")
+	secrets := logging.Secrets(config.Token(cmd.Flags(), os.Getenv))
+	hide := func(s string) string { return logging.MaskString(s, secrets...) }
+	// setupFail reports an error found before any request. shown is the text for
+	// the JSON report. returned is the error for stderr.
+	setupFail := func(shown, returned error) error {
+		if asJSON {
+			_ = writeJSONError(cmd.OutOrStdout(), errors.New(hide(shown.Error())))
+		}
+		return errors.New(hide(returned.Error()))
+	}
+
 	cfg, err := config.Resolve(cmd.Flags(), os.Getenv)
 	if err != nil {
-		return usageErr(cmd, err)
+		return setupFail(err, usageErr(cmd, err))
 	}
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.MaxIdleConnsPerHost = cfg.Concurrency
@@ -50,11 +67,12 @@ func runSend(cmd *cobra.Command, build builder) error {
 		defer cleanup()
 	}
 	if err != nil {
-		return err
+		return setupFail(err, err)
 	}
 
-	asJSON, _ := cmd.Flags().GetBool("json")
+	out := cmd.OutOrStdout()
 	bar := newProgress(jobs, !asJSON && stderrIsTerminal())
+	var outMu sync.Mutex // One sent line at a time, drawn in place of the bar.
 
 	log.Info("sending", zap.Int("jobs", len(jobs)))
 	began := time.Now()
@@ -65,7 +83,18 @@ func runSend(cmd *cobra.Command, build builder) error {
 		Timeout:     cfg.Timeout,
 		BackoffBase: backoffBase,
 		OnProgress:  bar.onProgress,
-		OnDone:      bar.onDone,
+		OnDone: func(i int, r dispatch.Result) {
+			bar.onDone(i, r)
+			if asJSON || r.Err != nil || r.Skipped {
+				return
+			}
+			r.Name = hide(r.Name)
+			outMu.Lock()
+			defer outMu.Unlock()
+			bar.pause()
+			_, _ = fmt.Fprintln(out, humanLine(r))
+			bar.resume()
+		},
 		OnAttempt: func(job string, attempt int, took time.Duration, err error) {
 			log.Debug("attempt", zap.String("job", job), zap.Int("attempt", attempt),
 				zap.Duration("took", took), zap.Bool("ok", err == nil))
@@ -76,6 +105,7 @@ func runSend(cmd *cobra.Command, build builder) error {
 		},
 	})
 	bar.finish()
+	hideResults(results, hide)
 	sum := summarize(results, time.Since(began))
 
 	for _, r := range results {
@@ -89,14 +119,30 @@ func runSend(cmd *cobra.Command, build builder) error {
 		}
 	}
 
-	write := writeHuman
 	if asJSON {
-		write = writeJSON
-	}
-	if err := write(cmd.OutOrStdout(), results, sum); err != nil {
+		if err := writeJSON(out, results, sum); err != nil {
+			return err
+		}
+	} else if err := writeSummary(out, results, sum); err != nil {
 		return err
 	}
-	return failure(results, cmd.Context().Err() != nil)
+	if err := failure(results, cmd.Context().Err() != nil); err != nil {
+		return errors.New(hide(err.Error()))
+	}
+	return nil
+}
+
+// hideResults removes secrets from the names and error texts of the results.
+// It keeps an error as it is when it holds no secret, so errors.Is still works.
+func hideResults(results []dispatch.Result, hide func(string) string) {
+	for i := range results {
+		results[i].Name = hide(results[i].Name)
+		if err := results[i].Err; err != nil {
+			if text := hide(err.Error()); text != err.Error() {
+				results[i].Err = errors.New(text)
+			}
+		}
+	}
 }
 
 // failure summarizes failed and skipped jobs. It returns nil when all jobs were sent.

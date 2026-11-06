@@ -107,3 +107,23 @@ func (p *progress) finish() {
 	_ = p.bar.Finish()
 	fmt.Fprintln(os.Stderr)
 }
+
+// pause clears the bar, so a line can print in its place.
+func (p *progress) pause() {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	_ = p.bar.Clear()
+}
+
+// resume draws the bar again after a line was printed.
+func (p *progress) resume() {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	_ = p.bar.RenderBlank()
+}

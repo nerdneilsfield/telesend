@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // call is one request that reached the mock Telegram server.
@@ -526,4 +528,78 @@ func TestRemoteVoiceNeedingConversionIsRejected(t *testing.T) {
 	if _, err := run(t, okEnv(m), "voice", "https://example.com/note.ogg", "--rpm", "1800"); err != nil {
 		t.Errorf("a remote .ogg must pass: %v", err)
 	}
+}
+
+func TestSetupErrorsGiveJSONFailureObject(t *testing.T) {
+	m := newMock(t)
+	file := touch(t, t.TempDir(), "a.pdf")[0]
+	for name, args := range map[string][]string{
+		"bad setting":  {"text", "hi", "--json", "--rpm", "0"},
+		"missing file": {"file", file + ".nope", "--json"},
+	} {
+		out, err := run(t, okEnv(m), args...)
+		if err == nil {
+			t.Fatalf("%s: want an error", name)
+		}
+		var rep struct {
+			OK    bool   `json:"ok"`
+			Error string `json:"error"`
+		}
+		if jerr := json.Unmarshal([]byte(out), &rep); jerr != nil || rep.OK || rep.Error == "" {
+			t.Errorf("%s: stdout is not a failure object: %v\n%s", name, jerr, out)
+		}
+	}
+	if len(m.calls) != 0 {
+		t.Errorf("a setup error must send nothing, got %d calls", len(m.calls))
+	}
+}
+
+func TestTokenInJobNameIsMasked(t *testing.T) {
+	m := newMock(t)
+	m.failBody = `{"ok":false,"error_code":403,"description":"Forbidden"}`
+	env := okEnv(m)
+	env["TELESEND_BOT_TOKEN"] = "SECRET:TOKENVALUE"
+	url := "https://api.telegram.org/file/botSECRET:TOKENVALUE/doc.pdf"
+	out, err := run(t, env, "file", url, "--json", "--rpm", "1800")
+	if err == nil || strings.Contains(err.Error(), "TOKENVALUE") || strings.Contains(out, "TOKENVALUE") {
+		t.Errorf("token leaked: err=%v out=%s", err, out)
+	}
+}
+
+func TestSentLinesComeBeforeTheNextSend(t *testing.T) {
+	// The first album must print its line while the second one waits for its slot.
+	stampedLines = nil
+	m := newMock(t)
+	files := touch(t, t.TempDir(), "a.jpg", "b.jpg", "c.jpg", "d.jpg")
+	var out bytes.Buffer
+	t.Setenv("TELESEND_BOT_TOKEN", "tok")
+	t.Setenv("TELESEND_CHAT_ID", "1")
+	t.Setenv("TELESEND_BASE_URL", m.URL)
+	root := NewRootCmd()
+	root.SetOut(&lineStamp{w: &out})
+	root.SetErr(&out)
+	root.SetArgs(append(append([]string{"photo"}, files...), "--album-size", "2", "--rpm", "60"))
+	if err := root.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	stamps := stampedLines
+	if len(stamps) < 3 {
+		t.Fatalf("want two sent lines and a summary, got %v", stamps)
+	}
+	// rpm 60 is 1 s per message, so an album of 2 holds the next send back for 2 s.
+	if gap := stamps[1].Sub(stamps[0]); gap < 1500*time.Millisecond {
+		t.Errorf("the second line came %v after the first; lines are printed late", gap)
+	}
+}
+
+var stampedLines []time.Time
+
+// lineStamp records when each line is written.
+type lineStamp struct{ w io.Writer }
+
+func (l *lineStamp) Write(p []byte) (int, error) {
+	for range bytes.Count(p, []byte("\n")) {
+		stampedLines = append(stampedLines, time.Now())
+	}
+	return l.w.Write(p)
 }

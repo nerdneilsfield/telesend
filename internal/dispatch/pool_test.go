@@ -186,3 +186,40 @@ func TestAfter429PauseSendersStayEvenlySpaced(t *testing.T) {
 		}
 	}
 }
+
+func TestNoWindowHoldsMoreThanRPM(t *testing.T) {
+	// 20 messages per 1 s window (the real limit is per minute). Four albums of 6 are 24 messages.
+	// Spacing alone would send them at 0, 0.3, 0.6 and 0.9 s, which is 24 in one window.
+	lim := newLimiter(20, time.Second)
+	var starts []time.Time
+	began := time.Now()
+	for range 4 {
+		if err := lim.Wait(context.Background(), 6); err != nil {
+			t.Fatal(err)
+		}
+		starts = append(starts, time.Now())
+	}
+	for i, s := range starts {
+		total := 0
+		for _, o := range starts[:i+1] {
+			if s.Sub(o) < time.Second-15*time.Millisecond {
+				total += 6
+			}
+		}
+		if total > 20 {
+			t.Errorf("send %d at %v: %d messages in the last window; limit 20", i, s.Sub(began).Round(10*time.Millisecond), total)
+		}
+	}
+	if d := starts[3].Sub(starts[0]); d < 950*time.Millisecond {
+		t.Errorf("the fourth album started %v after the first; want >= ~1s", d)
+	}
+}
+
+func TestWeightAboveRPMStillGoesOut(t *testing.T) {
+	lim := newLimiter(5, time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := lim.Wait(ctx, 10); err != nil {
+		t.Fatalf("an album of 10 at rpm 5 must still be sent: %v", err)
+	}
+}

@@ -50,6 +50,7 @@ Rules:
 | Field | Meaning |
 | --- | --- |
 | `ok` | `true` when every message was sent. |
+| `error` | The reason, when the run failed before it sent anything (`results` is empty). |
 | `sent`, `failed`, `skipped` | Counts of jobs. A job is one message or one album. |
 | `results[].name` | The job, for example `photo a.jpg` or `album 1-10 of 25`. |
 | `results[].message_ids` | The IDs of the messages that Telegram created. |
@@ -57,7 +58,8 @@ Rules:
 | `stats.elapsed_ms`, `stats.avg_speed_bps` | Total time and average upload speed. |
 
 1. Exit code 0 means `ok` is `true`. Report `sent` and the `message_ids`.
-2. Exit code 1 means a failure. Report the `error` of the failed job. Report `skipped`, the number of unsent jobs.
+2. Exit code 1 means a failure. Report the top-level `error`, or the `error` of the failed job. Report `skipped`, the number of unsent jobs.
+   If stdout is empty, read stderr. It holds the usage message of a wrong command line.
 3. Do not retry on your own. `telesend` already retries `429`, `5xx`, and network errors.
 
 ## Errors

@@ -86,26 +86,36 @@ func Convert(src string, limit int) ([]string, error) {
 		}
 		pieces = append(pieces, parts...)
 	}
-	return pack(pieces, limit, VisibleLen), nil
+	return pack(pieces, limit, VisibleLen, true), nil
 }
 
 // pack joins pieces into messages of at most limit characters, as size measures them.
-func pack(pieces []piece, limit int, size func(string) int) []string {
+// With trim, it removes the spaces and line breaks around each message.
+// Code blocks need trim off, because their spaces are content.
+func pack(pieces []piece, limit int, size func(string) int, trim bool) []string {
 	var out []string
-	cur := ""
+	cur, started := "", false
+	flush := func() {
+		if trim {
+			cur = strings.Trim(cur, " \n")
+		}
+		if cur != "" || !trim {
+			out = append(out, cur)
+		}
+	}
 	for _, p := range pieces {
 		switch {
-		case cur == "":
-			cur = p.text
+		case !started:
+			cur, started = p.text, true
 		case size(cur+p.sep+p.text) <= limit:
 			cur += p.sep + p.text
 		default:
-			out = append(out, strings.Trim(cur, " \n"))
+			flush()
 			cur = p.text
 		}
 	}
-	if cur = strings.Trim(cur, " \n"); cur != "" {
-		out = append(out, cur)
+	if started {
+		flush()
 	}
 	return out
 }
@@ -128,7 +138,10 @@ func (r *renderer) block(n ast.Node) ([]piece, error) {
 	case *ast.Paragraph, *ast.TextBlock:
 		return r.paragraph(n)
 	case *ast.List:
-		items := r.listItems(n, 0)
+		items, err := r.listItems(n, 0)
+		if err != nil {
+			return nil, err
+		}
 		out := make([]piece, len(items))
 		for i, it := range items {
 			if VisibleLen(it) > r.limit {
@@ -141,7 +154,11 @@ func (r *renderer) block(n ast.Node) ([]piece, error) {
 		}
 		return out, nil
 	}
-	s := strings.TrimRight(r.blockText(n, 0), "\n")
+	s, err := r.blockText(n, 0)
+	if err != nil {
+		return nil, err
+	}
+	s = strings.TrimRight(s, "\n")
 	if VisibleLen(s) > r.limit {
 		return nil, r.tooLong("a heading, quote or other block")
 	}
@@ -170,7 +187,7 @@ func (r *renderer) paragraph(n ast.Node) ([]piece, error) {
 		}
 		atoms = append(atoms, piece{text: s})
 	}
-	parts := pack(atoms, r.limit, VisibleLen)
+	parts := pack(atoms, r.limit, VisibleLen, true)
 	out := make([]piece, len(parts))
 	for i, p := range parts {
 		out[i] = piece{text: p}
@@ -233,7 +250,7 @@ func (r *renderer) code(n ast.Node) ([]piece, error) {
 		lines = append(lines, piece{text: escapeSet(string(raw), "`\\"), sep: "\n"})
 	}
 	var out []piece
-	for _, body := range pack(lines, budget, VisibleLen) {
+	for _, body := range pack(lines, budget, VisibleLen, false) {
 		out = append(out, piece{text: head + body + tail, sep: "\n"})
 	}
 	if len(out) == 0 {
@@ -243,55 +260,63 @@ func (r *renderer) code(n ast.Node) ([]piece, error) {
 	return out, nil
 }
 
-func (r *renderer) blockText(n ast.Node, depth int) string {
+func (r *renderer) blockText(n ast.Node, depth int) (string, error) {
 	switch n := n.(type) {
 	case *ast.Heading:
-		return "*" + r.inline(n) + "*"
+		return "*" + r.inline(n) + "*", nil
 	case *ast.Paragraph, *ast.TextBlock:
-		return r.inline(n)
+		return r.inline(n), nil
 	case *ast.ThematicBreak:
-		return "———"
+		return "———", nil
 	case *ast.Blockquote:
-		inner := r.children(n, depth)
+		inner, err := r.children(n, depth)
+		if err != nil {
+			return "", err
+		}
 		lines := strings.Split(strings.TrimRight(inner, "\n"), "\n")
 		for i, l := range lines {
 			lines[i] = ">" + l
 		}
-		return strings.Join(lines, "\n")
+		return strings.Join(lines, "\n"), nil
 	case *ast.List:
-		return strings.Join(r.listItems(n, depth), "\n")
+		items, err := r.listItems(n, depth)
+		return strings.Join(items, "\n"), err
 	case *ast.HTMLBlock:
 		var b strings.Builder
 		for i := 0; i < n.Lines().Len(); i++ {
 			seg := n.Lines().At(i)
 			b.Write(seg.Value(r.src))
 		}
-		return Escape(strings.TrimRight(b.String(), "\n"))
+		return Escape(strings.TrimRight(b.String(), "\n")), nil
 	case *ast.FencedCodeBlock, *ast.CodeBlock:
 		// A code block inside a quote or list item stays whole.
 		parts, err := r.code(n)
 		if err != nil {
-			return ""
+			return "", err
 		}
 		var s []string
 		for _, p := range parts {
 			s = append(s, p.text)
 		}
-		return strings.Join(s, "\n")
+		return strings.Join(s, "\n"), nil
 	}
 	return r.children(n, depth)
 }
 
-func (r *renderer) children(n ast.Node, depth int) string {
+func (r *renderer) children(n ast.Node, depth int) (string, error) {
 	var parts []string
 	for c := n.FirstChild(); c != nil; c = c.NextSibling() {
-		parts = append(parts, r.blockText(c, depth))
+		s, err := r.blockText(c, depth)
+		if err != nil {
+			return "", err
+		}
+		parts = append(parts, s)
 	}
-	return strings.Join(parts, "\n\n")
+	return strings.Join(parts, "\n\n"), nil
 }
 
 // listItems renders each item of l, with its marker and its nested lists.
-func (r *renderer) listItems(l *ast.List, depth int) []string {
+func (r *renderer) listItems(l *ast.List, depth int) ([]string, error) {
 	var items []string
 	num := l.Start
 	indent := strings.Repeat("  ", depth)
@@ -303,11 +328,15 @@ func (r *renderer) listItems(l *ast.List, depth int) []string {
 		}
 		var body []string
 		for c := item.FirstChild(); c != nil; c = c.NextSibling() {
-			body = append(body, r.blockText(c, depth+1))
+			s, err := r.blockText(c, depth+1)
+			if err != nil {
+				return nil, err
+			}
+			body = append(body, s)
 		}
 		items = append(items, indent+marker+" "+strings.Join(body, "\n"))
 	}
-	return items
+	return items, nil
 }
 
 func (r *renderer) inline(n ast.Node) string {

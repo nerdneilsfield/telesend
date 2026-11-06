@@ -24,7 +24,12 @@ This page is for contributors. It is available in English only.
 
 ## Limiter and pool
 
-The limiter keeps a slot clock. One slot is 60 s ÷ `rpm`. A job of weight n starts at the next free slot, and then it closes the next n slots. The weight of an album is its item count. The burst of an album is paid for after it, so the long-run rate is `rpm` messages per minute. A single 60 s window can exceed `rpm` by less than the size of one album.
+The limiter hands out start times by two rules. The weight of a job is its message count: 1 for a text, the item count for an album. A weight above `rpm` is capped at `rpm`.
+
+1. Spacing: a job of weight n starts at the next free slot, and then it closes the next n slots. One slot is 60 s ÷ `rpm`.
+2. Window: a job starts only when the weights of the jobs that started in the last 60 s, plus its own weight, are at most `rpm`. If not, the job waits until the oldest of those jobs leaves the window.
+
+Rule 1 keeps single messages evenly spaced. Rule 2 keeps every 60 s window at or under `rpm` messages.
 
 On a `429` reply, the worker calls `Limiter.Pause` with the `retry_after` value. A slot that falls inside the pause is void, and its worker reserves a new slot after the pause. The workers then restart one slot apart.
 
