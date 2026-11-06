@@ -25,6 +25,8 @@ telesend text --file notes.md
 git log -5 --oneline | telesend text
 ```
 
+要发送以 `-` 开头的文本，在它前面加 `--`：`telesend text -- "-1 degree"`。
+
 `--file` 把文件内容作为消息文本发送，不会把文件作为附件发送。要发送附件，使用 `telesend file`。
 
 长文本会拆分为多条消息，消息按顺序到达。每条消息默认最多 4096 个字符。用 `--text-limit` 设置更小的值。

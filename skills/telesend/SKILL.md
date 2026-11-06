@@ -21,8 +21,8 @@ Never print, log, or echo the bot token. For debugging, add `-v`. The log masks 
 
 | User asks to send | Command |
 | --- | --- |
-| A short message | `telesend text "<text>" --json` |
-| Formatted text (bold, lists, links, code) | `telesend text --markdown "<markdown>" --json` |
+| A short message | `telesend text --json -- "<text>"` |
+| Formatted text (bold, lists, links, code) | `telesend text --markdown --json -- "<markdown>"` |
 | The content of a text or Markdown file, as a message | `telesend text --file <path> [--markdown] --json` |
 | Command output as text | `<command> \| telesend text --json` |
 | One photo | `telesend photo <path-or-url> --json` |
@@ -40,7 +40,7 @@ Rules:
 3. Pass every file in one command. `telesend` splits long text at 4096 characters and packs files into albums of 10. Do not split them yourself.
 4. Send an image with `file` when the user wants the original quality or the image is larger than 10 MB.
 5. Change `--text-limit` (1 to 4096) or `--album-size` (2 to 10) only when the user asks.
-6. Quote every text argument. Use single quotes when the text contains `$` or backticks.
+6. Put the flags before `--` and the text after it. Then a text that starts with `-` is not read as a flag. Quote the text. Use single quotes when the text contains `$` or backticks.
 7. Do not change `--rpm` or `--concurrency` unless the user asks.
 
 ## Read the result

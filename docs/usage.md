@@ -25,6 +25,8 @@ telesend text --file notes.md
 git log -5 --oneline | telesend text
 ```
 
+To send a text that starts with `-`, put `--` before it: `telesend text -- "-1 degree"`.
+
 `--file` sends the content of the file as the message text. It does not attach the file. To attach a file, use `telesend file`.
 
 A long text is cut into several messages. The messages arrive in order. The default maximum is 4096 characters per message. Set a lower value with `--text-limit`.
