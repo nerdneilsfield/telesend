@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image"
+	"image/png"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -772,5 +774,104 @@ func TestLateSignalDoesNotTurnSuccessIntoFailure(t *testing.T) {
 	err := failure(mixed, true)
 	if err == nil || !strings.Contains(err.Error(), "interrupted") || !strings.Contains(err.Error(), "2 job(s) not sent") {
 		t.Errorf("an interrupted run: %v", err)
+	}
+}
+
+func TestSilentAndThreadApplyToEveryMessageKind(t *testing.T) {
+	m := newMock(t)
+	files := touch(t, t.TempDir(), "a.jpg", "b.jpg", "c.pdf", "v.ogg")
+	cmds := [][]string{
+		{"text", "hi"},
+		{"photo", files[0]},
+		{"photo", files[0], files[1]},
+		{"file", files[2]},
+		{"voice", files[3]},
+	}
+	for _, c := range cmds {
+		args := append(append([]string{}, c...), "--silent", "--thread", "42", "--rpm", "1800")
+		if _, err := run(t, okEnv(m), args...); err != nil {
+			t.Fatalf("%v: %v", c, err)
+		}
+	}
+	if len(m.calls) != len(cmds) {
+		t.Fatalf("calls: %d", len(m.calls))
+	}
+	for _, c := range m.calls {
+		if c.form["disable_notification"] != "true" || c.form["message_thread_id"] != "42" {
+			t.Errorf("%s: silent and thread missing: %+v", c.method, c.form)
+		}
+	}
+
+	m2 := newMock(t)
+	if _, err := run(t, okEnv(m2), "text", "hi", "--rpm", "1800"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := m2.calls[0].form["disable_notification"]; ok {
+		t.Error("without --silent the field must be absent")
+	}
+	if _, ok := m2.calls[0].form["message_thread_id"]; ok {
+		t.Error("without --thread the field must be absent")
+	}
+	if _, err := run(t, okEnv(m2), "text", "hi", "--thread", "-1"); err == nil {
+		t.Error("a negative thread must fail")
+	}
+}
+
+func pngFile(t *testing.T, dir, name string, w, h int) string {
+	t.Helper()
+	p := filepath.Join(dir, name)
+	f, err := os.Create(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if err := png.Encode(f, image.NewGray(image.Rect(0, 0, w, h))); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func TestPhotoTelegramWouldRejectGoesOutAsFile(t *testing.T) {
+	dir := t.TempDir()
+	ok1, ok2 := pngFile(t, dir, "ok1.png", 100, 100), pngFile(t, dir, "ok2.png", 100, 100)
+	wide := pngFile(t, dir, "wide.png", 10001, 1) // The sides total 10002.
+
+	// A single photo that does not fit becomes a document.
+	m := newMock(t)
+	if _, err := run(t, okEnv(m), "photo", wide, "-c", "Pano", "--rpm", "1800"); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.calls) != 1 || m.calls[0].method != "sendDocument" || m.calls[0].form["caption"] != "Pano" {
+		t.Fatalf("a wide photo must go out as a document with its caption: %+v", m.calls)
+	}
+
+	// In a list, the photos that fit stay an album. The one that does not follows as a file.
+	m = newMock(t)
+	if _, err := run(t, okEnv(m), "photo", ok1, wide, ok2, "-c", "Set", "--rpm", "1800"); err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, c := range m.calls {
+		got = append(got, c.method)
+	}
+	if strings.Join(got, ",") != "sendMediaGroup,sendDocument" {
+		t.Fatalf("calls: %v", got)
+	}
+	types, caps := mediaTypes(t, m.calls[0])
+	if strings.Join(types, ",") != "photo,photo" || caps[0] != "Set" {
+		t.Errorf("album: types=%v captions=%v", types, caps)
+	}
+	if _, has := m.calls[1].form["caption"]; has {
+		t.Error("only the first message carries the caption")
+	}
+
+	// When nothing is left for an album, the file takes the caption.
+	m = newMock(t)
+	if _, err := run(t, okEnv(m), "photo", wide, pngFile(t, dir, "wide2.png", 10001, 1), "-c", "Both", "--rpm", "1800"); err != nil {
+		t.Fatal(err)
+	}
+	types, caps = mediaTypes(t, m.calls[0])
+	if m.calls[0].method != "sendMediaGroup" || strings.Join(types, ",") != "document,document" || caps[0] != "Both" {
+		t.Errorf("two unfit photos make a document album with the caption: %s %v %v", m.calls[0].method, types, caps)
 	}
 }

@@ -54,7 +54,9 @@ lists, quotes, links and code.`,
 						name = fmt.Sprintf("text %d/%d", i+1, len(pieces))
 					}
 					jobs[i] = dispatch.Job{Name: name, Run: func(ctx context.Context) ([]int, error) {
-						return s.client.SendMessage(ctx, s.cfg.ChatID, p, markdown)
+						o := s.options()
+						o.Markdown = markdown
+						return s.client.SendMessage(ctx, p, o)
 					}}
 				}
 				return jobs, nil, nil

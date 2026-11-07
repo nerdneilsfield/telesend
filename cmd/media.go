@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
+	"go.uber.org/zap"
 
 	"github.com/nerdneilsfield/telesend/internal/audio"
 	"github.com/nerdneilsfield/telesend/internal/dispatch"
@@ -29,7 +30,8 @@ One photo goes out as a single message. Several photos go out as albums.
 The caption appears on the first photo.
 
 Telegram recompresses photos. To keep the original quality, send the image
-with 'telesend file'.`,
+with 'telesend file'. A photo that Telegram would reject, such as one over
+10 MB, goes out as a file and telesend says so.`,
 		example: `  telesend photo cat.jpg
   telesend photo a.jpg b.jpg c.jpg --caption "Trip"
   telesend photo ./shots/*.png`,
@@ -92,7 +94,7 @@ func newAlbumCmd(sp albumSpec) *cobra.Command {
 		Args: minArgs(1, sp.need),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runSend(cmd, func(_ context.Context, s session) ([]dispatch.Job, func(), error) {
-				opts, err := capt.options(s.cfg.ChatID)
+				opts, err := capt.options(s)
 				if err != nil {
 					return nil, nil, err
 				}
@@ -100,12 +102,39 @@ func newAlbumCmd(sp albumSpec) *cobra.Command {
 				if err != nil {
 					return nil, nil, err
 				}
-				return albumJobs(s, media, args, opts), nil, nil
+				return photoAndDocJobs(s, media, args, opts, loggerFrom(cmd)), nil, nil
 			})
 		},
 	}
 	capt.addFlags(c)
 	return c
+}
+
+// photoAndDocJobs builds the jobs for photos, videos and documents. Telegram groups
+// documents only with documents, so they form their own albums after the others.
+// A photo that Telegram would reject (over 10 MB or with extreme sides) joins them.
+func photoAndDocJobs(s session, media []telegram.Media, names []string, opts telegram.Options, log *zap.Logger) []dispatch.Job {
+	var keep, docs []telegram.Media
+	var keepNames, docNames []string
+	for i, m := range media {
+		if m.Kind == telegram.KindPhoto && m.Path != "" {
+			if ok, reason := telegram.PhotoFits(m.Path); !ok {
+				log.Warn("sending the photo as a file", zap.String("path", m.Path), zap.String("reason", reason))
+				m.Kind = telegram.KindDocument
+			}
+		}
+		if m.Kind == telegram.KindDocument {
+			docs, docNames = append(docs, m), append(docNames, names[i])
+		} else {
+			keep, keepNames = append(keep, m), append(keepNames, names[i])
+		}
+	}
+	jobs := albumJobs(s, keep, keepNames, opts)
+	docOpts := opts
+	if len(jobs) > 0 {
+		docOpts.Caption, docOpts.Markdown = "", false
+	}
+	return append(jobs, albumJobs(s, docs, docNames, docOpts)...)
 }
 
 // albumJobs groups media into albums of s.cfg.AlbumSize items. One leftover item goes out alone.
@@ -166,7 +195,7 @@ format (.wav, .flac, .aac ...) telesend converts the file with ffmpeg.`,
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runSend(cmd, func(ctx context.Context, s session) ([]dispatch.Job, func(), error) {
-				opts, err := capt.options(s.cfg.ChatID)
+				opts, err := capt.options(s)
 				if err != nil {
 					return nil, nil, err
 				}

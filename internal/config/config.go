@@ -54,6 +54,10 @@ type Config struct {
 	AlbumSize int
 	// TextLimit is the number of characters in one text message.
 	TextLimit int
+	// Silent sends without a notification sound.
+	Silent bool
+	// Thread is the forum topic ID. Zero means no topic.
+	Thread int
 }
 
 // AddFlags registers the setting flags on fs.
@@ -63,6 +67,8 @@ func AddFlags(fs *pflag.FlagSet) {
 	fs.StringP("to", "t", "", "recipient chat ID or @channel name (env "+EnvChatID+")")
 	fs.Int("album-size", DefaultAlbumSize, "items per album, 2 to 10 (env "+EnvAlbumSize+")")
 	fs.Int("text-limit", DefaultTextLimit, "characters per text message, 1 to 4096 (env "+EnvTextLimit+")")
+	fs.Bool("silent", false, "send without a notification sound")
+	fs.Int("thread", 0, "forum topic (thread) ID in a supergroup")
 	fs.Int("concurrency", DefaultConcurrency, "parallel requests; above 1 the send order is not kept")
 	fs.Int("rpm", DefaultRPM, "maximum requests per minute")
 	fs.Int("retries", DefaultRetries, "retries after a 429, a 5xx response or a network error")
@@ -103,6 +109,8 @@ func Resolve(fs *pflag.FlagSet, getenv func(string) string) (Config, error) {
 	if c.TextLimit, err = pickInt(fs, getenv, "text-limit", EnvTextLimit); err != nil {
 		errs = append(errs, err)
 	}
+	c.Silent, _ = fs.GetBool("silent")
+	c.Thread, _ = fs.GetInt("thread")
 	c.Concurrency, _ = fs.GetInt("concurrency")
 	c.RPM, _ = fs.GetInt("rpm")
 	c.Retries, _ = fs.GetInt("retries")
@@ -148,6 +156,9 @@ func (c Config) validate() error {
 	}
 	if c.TextLimit < 1 || c.TextLimit > 4096 {
 		errs = append(errs, errors.New("--text-limit must be 1 to 4096"))
+	}
+	if c.Thread < 0 {
+		errs = append(errs, errors.New("--thread must be a topic ID, 1 or more"))
 	}
 	if c.Retries < 0 {
 		errs = append(errs, errors.New("--retries must be 0 or more"))

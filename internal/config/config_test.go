@@ -74,3 +74,15 @@ func TestSizeSettings(t *testing.T) {
 		}
 	}
 }
+
+func TestSilentAndThread(t *testing.T) {
+	base := map[string]string{EnvToken: "t", EnvChatID: "1"}
+	c, err := resolve(t, base, "--silent", "--thread", "7")
+	if err != nil || !c.Silent || c.Thread != 7 {
+		t.Errorf("%+v %v", c, err)
+	}
+	c, err = resolve(t, base)
+	if err != nil || c.Silent || c.Thread != 0 {
+		t.Errorf("defaults: %+v %v", c, err)
+	}
+}

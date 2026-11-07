@@ -28,6 +28,11 @@ type session struct {
 	client *telegram.Client
 }
 
+// options returns the send options that every message shares.
+func (s session) options() telegram.Options {
+	return telegram.Options{ChatID: s.cfg.ChatID, Silent: s.cfg.Silent, Thread: s.cfg.Thread}
+}
+
 // builder turns the command input into jobs. cleanup may be nil.
 type builder func(ctx context.Context, s session) (jobs []dispatch.Job, cleanup func(), err error)
 
@@ -189,9 +194,9 @@ func (c *captionOpts) addFlags(cmd *cobra.Command) {
 	cmd.Flags().BoolVarP(&c.markdown, "markdown", "m", false, "treat the caption as Markdown")
 }
 
-// options returns the send options for chat, with the caption already converted.
-func (c captionOpts) options(chat string) (telegram.Options, error) {
-	o := telegram.Options{ChatID: chat}
+// options returns the send options, with the caption already converted.
+func (c captionOpts) options(s session) (telegram.Options, error) {
+	o := s.options()
 	if c.text == "" {
 		return o, nil
 	}

@@ -25,10 +25,26 @@ type Options struct {
 	Caption string
 	// Markdown marks Caption (or the text) as MarkdownV2 that is already escaped.
 	Markdown bool
+	// Silent sends the message without a notification sound.
+	Silent bool
+	// Thread is the forum topic ID in a supergroup. Zero means no topic.
+	Thread int
+}
+
+// base returns the fields that every send method takes.
+func (o Options) base() map[string]string {
+	f := map[string]string{"chat_id": o.ChatID}
+	if o.Silent {
+		f["disable_notification"] = "true"
+	}
+	if o.Thread > 0 {
+		f["message_thread_id"] = strconv.Itoa(o.Thread)
+	}
+	return f
 }
 
 func (o Options) fields() map[string]string {
-	f := map[string]string{"chat_id": o.ChatID}
+	f := o.base()
 	if o.Caption != "" {
 		f["caption"] = o.Caption
 		if o.Markdown {
@@ -38,10 +54,11 @@ func (o Options) fields() map[string]string {
 	return f
 }
 
-// SendMessage sends one text message. Markdown means text is escaped MarkdownV2.
-func (c *Client) SendMessage(ctx context.Context, chatID, text string, markdown bool) ([]int, error) {
-	f := map[string]string{"chat_id": chatID, "text": text}
-	if markdown {
+// SendMessage sends one text message. With o.Markdown, text is escaped MarkdownV2.
+func (c *Client) SendMessage(ctx context.Context, text string, o Options) ([]int, error) {
+	f := o.base()
+	f["text"] = text
+	if o.Markdown {
 		f["parse_mode"] = parseModeV2
 	}
 	return c.sendOne(ctx, "sendMessage", f, nil)
@@ -121,7 +138,9 @@ func (c *Client) SendMediaGroup(ctx context.Context, media []Media, o Options) (
 	if err != nil {
 		return nil, err
 	}
-	return c.sendOne(ctx, "sendMediaGroup", map[string]string{"chat_id": o.ChatID, "media": string(raw)}, files)
+	f := o.base()
+	f["media"] = string(raw)
+	return c.sendOne(ctx, "sendMediaGroup", f, files)
 }
 
 func (c *Client) sendMedia(ctx context.Context, method, field string, m Media, o Options, extra map[string]string) ([]int, error) {
