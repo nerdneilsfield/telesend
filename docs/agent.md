@@ -6,15 +6,27 @@
 
 ## Install the skill
 
+You need Node.js for `npx`.
+
 1. Install `telesend`.
 2. Set `TELESEND_BOT_TOKEN` and `TELESEND_CHAT_ID` in the environment of the agent.
-3. Copy the skill to your skills directory.
+3. Install the skill into the current project.
 
    ```
-   cp -r skills/telesend ~/.claude/skills/
+   npx skills add nerdneilsfield/telesend --skill telesend -a claude-code
    ```
+
+   To install it for all your projects, add `-g`. The skill then goes to `~/.claude/skills/`.
 
 4. Ask the agent: "Send build.log to Telegram."
+
+To see the skill before you install it, run `npx skills add nerdneilsfield/telesend --list`.
+
+Optional: install without `npx`. Copy the directory by hand.
+
+```
+cp -r skills/telesend ~/.claude/skills/
+```
 
 The agent runs `telesend file build.log --json` and reports the message IDs.
 

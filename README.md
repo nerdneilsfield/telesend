@@ -53,6 +53,16 @@ In a terminal, telesend shows a progress bar with the speed and the time left. A
 
 Run `telesend --help` or `telesend <command> --help` for all commands and flags.
 
+## Use with an AI agent
+
+Install the Claude Code skill. You need Node.js.
+
+```
+npx skills add nerdneilsfield/telesend --skill telesend -a claude-code
+```
+
+Then ask the agent: "Send build.log to Telegram."
+
 ## Learn more
 
 - [Usage](docs/usage.md): every command, Markdown, albums, voice

@@ -53,6 +53,16 @@ telesend voice meeting.wav
 
 运行 `telesend --help` 或 `telesend <command> --help`，查看全部命令和参数。
 
+## 与 AI Agent 配合使用
+
+安装 Claude Code skill。需要 Node.js。
+
+```
+npx skills add nerdneilsfield/telesend --skill telesend -a claude-code
+```
+
+然后对 Agent 说：“把 build.log 发到 Telegram。”
+
 ## 了解更多
 
 - [用法](docs/usage.zh-CN.md)：全部命令、Markdown、相册、语音
