@@ -13,6 +13,8 @@
 | `--base-url` | `TELESEND_BASE_URL` | `https://api.telegram.org` | Bot API 地址。 |
 | `--album-size` | `TELESEND_ALBUM_SIZE` | `10` | 每个相册的条目数，范围 2 到 10。 |
 | `--text-limit` | `TELESEND_TEXT_LIMIT` | `4096` | 每条文本消息的字符数，范围 1 到 4096。 |
+| `--silent` | 无 | 关 | 发送时不提示声音。 |
+| `--thread` | 无 | `0`（无话题） | 论坛话题 ID，用于开启话题的超级群。 |
 | `--rpm` | 无 | `20` | 每分钟最大请求数，范围 1 到 1800。 |
 | `--concurrency` | 无 | `1` | 同时进行的请求数，范围 1 到 16。 |
 | `--retries` | 无 | `3` | 临时失败后的重试次数。 |

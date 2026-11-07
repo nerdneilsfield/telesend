@@ -13,6 +13,8 @@ A flag overrides the environment variable. The environment variable overrides th
 | `--base-url` | `TELESEND_BASE_URL` | `https://api.telegram.org` | Bot API address. |
 | `--album-size` | `TELESEND_ALBUM_SIZE` | `10` | Items per album, 2 to 10. |
 | `--text-limit` | `TELESEND_TEXT_LIMIT` | `4096` | Characters per text message, 1 to 4096. |
+| `--silent` | none | off | Send without a notification sound. |
+| `--thread` | none | `0` (no topic) | Forum topic ID, for a supergroup with topics. |
 | `--rpm` | none | `20` | Maximum requests per minute, 1 to 1800. |
 | `--concurrency` | none | `1` | Requests in flight, 1 to 16. |
 | `--retries` | none | `3` | Retries after a temporary failure. |

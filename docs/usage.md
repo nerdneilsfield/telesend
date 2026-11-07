@@ -75,7 +75,9 @@ Telegram accepts documents in an album only with other documents. Use `file` for
 
 A local path must name a regular file. A directory, a pipe, or a device stops with an error.
 
-Telegram recompresses photos and limits them to 10 MB. To keep the original image, send it with `telesend file`.
+Telegram recompresses photos. To keep the original image, send it with `telesend file`.
+
+Telegram rejects a photo that is over 10 MB, whose width plus height is over 10,000 pixels, or whose long side is more than 20 times its short side. telesend checks these limits before it sends. A photo that fails is sent as a file instead, after the albums, and telesend prints a warning with the reason. The caption goes with the first message.
 
 Bots upload up to 50 MB per file through `api.telegram.org`. A self-hosted Bot API server accepts larger files.
 

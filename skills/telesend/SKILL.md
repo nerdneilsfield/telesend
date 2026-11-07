@@ -38,10 +38,11 @@ Rules:
 1. Always add `--json`.
 2. "Send this file as a message" means the file content is the message: use `text --file`. "Attach", "upload", or "send the file" means a document: use `file`.
 3. Pass every file in one command. `telesend` splits long text at 4096 characters and packs files into albums of 10. Do not split them yourself.
-4. Send an image with `file` when the user wants the original quality or the image is larger than 10 MB.
+4. Send an image with `file` when the user wants the original quality. `telesend` sends a photo that Telegram would reject (over 10 MB or with extreme sides) as a file by itself. The name of that job starts with `file`. Tell the user.
 5. Change `--text-limit` (1 to 4096) or `--album-size` (2 to 10) only when the user asks.
 6. Put the flags before `--` and the text after it. Then a text that starts with `-` is not read as a flag. Quote the text. Use single quotes when the text contains `$` or backticks.
-7. Do not change `--rpm` or `--concurrency` unless the user asks.
+7. Add `--silent` when the user wants no notification sound. Add `--thread <id>` when the user names a forum topic of a group.
+8. Do not change `--rpm` or `--concurrency` unless the user asks.
 
 ## Read the result
 
