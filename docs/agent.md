@@ -2,7 +2,7 @@
 
 [简体中文](agent.zh-CN.md) · [Usage](usage.md)
 
-`skills/telesend/SKILL.md` is a Claude Code skill. It turns natural-language requests into `telesend` commands.
+`skills/telesend/SKILL.md` is an agent skill. It turns natural-language requests into `telesend` commands. Any agent that loads `SKILL.md` skills can use it.
 
 ## Install the skill
 
@@ -13,16 +13,18 @@ You need Node.js for `npx`.
 3. Install the skill into the current project.
 
    ```
-   npx skills add nerdneilsfield/telesend --skill telesend -a claude-code
+   npx skills add nerdneilsfield/telesend --skill telesend
    ```
 
-   To install it for all your projects, add `-g`. The skill then goes to `~/.claude/skills/`.
+   The command finds the agents on your machine and lets you choose. To skip the choice, name the agent with `-a`, for example `-a claude-code`, `-a codex`, `-a cursor`, `-a opencode`, or `-a gemini-cli`.
+
+   To install the skill for all your projects, add `-g`.
 
 4. Ask the agent: "Send build.log to Telegram."
 
 To see the skill before you install it, run `npx skills add nerdneilsfield/telesend --list`.
 
-Optional: install without `npx`. Copy the directory by hand.
+Optional: install without `npx`. Copy the directory into the skills directory of your agent. For Claude Code, this is `~/.claude/skills/`.
 
 ```
 cp -r skills/telesend ~/.claude/skills/

@@ -55,19 +55,19 @@ Run `telesend --help` or `telesend <command> --help` for all commands and flags.
 
 ## Use with an AI agent
 
-Install the Claude Code skill. You need Node.js.
+Install the agent skill. The `skills` tool installs it for Claude Code, Codex, Cursor, OpenCode, Gemini CLI, and other agents that load `SKILL.md` skills. You need Node.js.
 
 ```
-npx skills add nerdneilsfield/telesend --skill telesend -a claude-code
+npx skills add nerdneilsfield/telesend --skill telesend
 ```
 
-Then ask the agent: "Send build.log to Telegram."
+The command finds the agents on your machine and lets you choose. Then ask the agent: "Send build.log to Telegram."
 
 ## Learn more
 
 - [Usage](docs/usage.md): every command, Markdown, albums, voice
 - [Configuration](docs/configuration.md): flags, environment variables, sending speed, logs
-- [Use with an AI agent](docs/agent.md): the Claude Code skill and the JSON output
+- [Use with an AI agent](docs/agent.md): the agent skill and the JSON output
 - [Internals](docs/internals.md): for contributors
 
 ## License

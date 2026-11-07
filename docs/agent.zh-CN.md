@@ -2,7 +2,7 @@
 
 [English](agent.md) · [用法](usage.zh-CN.md)
 
-`skills/telesend/SKILL.md` 是 Claude Code skill。它把自然语言请求转换为 `telesend` 命令。
+`skills/telesend/SKILL.md` 是 Agent skill。它把自然语言请求转换为 `telesend` 命令。任何加载 `SKILL.md` 的 Agent 都可以使用它。
 
 ## 安装 skill
 
@@ -13,16 +13,18 @@
 3. 把 skill 安装到当前项目。
 
    ```
-   npx skills add nerdneilsfield/telesend --skill telesend -a claude-code
+   npx skills add nerdneilsfield/telesend --skill telesend
    ```
 
-   要为你的所有项目安装，加上 `-g`。skill 会安装到 `~/.claude/skills/`。
+   命令会检测你机器上的 Agent，并让你选择。要跳过选择，用 `-a` 指定 Agent，例如 `-a claude-code`、`-a codex`、`-a cursor`、`-a opencode` 或 `-a gemini-cli`。
+
+   要为你的所有项目安装 skill，加上 `-g`。
 
 4. 对 Agent 说：“把 build.log 发到 Telegram。”
 
 安装前想先看看有哪些 skill，运行 `npx skills add nerdneilsfield/telesend --list`。
 
-可选：不用 `npx` 安装。手动复制目录。
+可选：不用 `npx` 安装。把目录复制到你的 Agent 的 skills 目录。Claude Code 的 skills 目录是 `~/.claude/skills/`。
 
 ```
 cp -r skills/telesend ~/.claude/skills/

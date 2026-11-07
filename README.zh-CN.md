@@ -55,19 +55,19 @@ telesend voice meeting.wav
 
 ## 与 AI Agent 配合使用
 
-安装 Claude Code skill。需要 Node.js。
+安装 Agent skill。`skills` 工具可以把它安装到 Claude Code、Codex、Cursor、OpenCode、Gemini CLI，以及其他加载 `SKILL.md` 的 Agent。需要 Node.js。
 
 ```
-npx skills add nerdneilsfield/telesend --skill telesend -a claude-code
+npx skills add nerdneilsfield/telesend --skill telesend
 ```
 
-然后对 Agent 说：“把 build.log 发到 Telegram。”
+命令会检测你机器上的 Agent，并让你选择。然后对 Agent 说：“把 build.log 发到 Telegram。”
 
 ## 了解更多
 
 - [用法](docs/usage.zh-CN.md)：全部命令、Markdown、相册、语音
 - [配置](docs/configuration.zh-CN.md)：参数、环境变量、发送速度、日志
-- [与 AI Agent 配合使用](docs/agent.zh-CN.md)：Claude Code skill 和 JSON 输出
+- [与 AI Agent 配合使用](docs/agent.zh-CN.md)：Agent skill 和 JSON 输出
 - [内部实现](docs/internals.md)：面向贡献者（仅英文）
 
 ## 许可证
