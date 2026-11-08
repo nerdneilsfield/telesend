@@ -9,6 +9,19 @@ telesend text "Build finished"
 telesend photo a.jpg b.jpg c.jpg --caption "Trip"
 ```
 
+## Homebrew / Scoop
+
+```bash
+# macOS / Linux
+brew install --cask nerdneilsfield/apps/telesend
+```
+
+```powershell
+# Windows
+scoop bucket add nerdneilsfield https://github.com/nerdneilsfield/homebrew-apps
+scoop install nerdneilsfield/telesend
+```
+
 ## Install
 
 You need Go 1.27 or later.

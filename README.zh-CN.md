@@ -9,6 +9,19 @@ telesend text "Build finished"
 telesend photo a.jpg b.jpg c.jpg --caption "Trip"
 ```
 
+## 通过 Homebrew / Scoop 安装
+
+```bash
+# macOS / Linux
+brew install --cask nerdneilsfield/apps/telesend
+```
+
+```powershell
+# Windows
+scoop bucket add nerdneilsfield https://github.com/nerdneilsfield/homebrew-apps
+scoop install nerdneilsfield/telesend
+```
+
 ## 安装
 
 需要 Go 1.27 或更高版本。
