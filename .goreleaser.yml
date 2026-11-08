@@ -36,6 +36,33 @@ release:
     owner: nerdneilsfield
     name: telesend
 
+homebrew_casks:
+  - name: telesend
+    homepage: https://github.com/nerdneilsfield/telesend
+    description: Send text, files, photos, videos, and voice messages to Telegram from the command line
+    directory: Casks
+    repository:
+      owner: nerdneilsfield
+      name: homebrew-apps
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
+    hooks:
+      post:
+        install_steps: |
+          on_macos do
+            run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/telesend"]
+          end
+
+scoops:
+  - name: telesend
+    homepage: https://github.com/nerdneilsfield/telesend
+    description: Send text, files, photos, videos, and voice messages to Telegram from the command line
+    license: MIT
+    directory: bucket
+    repository:
+      owner: nerdneilsfield
+      name: homebrew-apps
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
+
 dockers_v2:
   - id: telesend
     dockerfile: Dockerfile.goreleaser
